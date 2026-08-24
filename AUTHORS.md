@@ -1,1 +1,1 @@
-| Omar Boquiño Navarro | S23013990 | @usuario_github1 | | Nombre Completo Alumno 2 | S20XXXXXX | @usuario_github2 | | Marco Antonio Morales González | S23013998 | @Mark0-9843 | | Nombre Completo Alumno 4 | S20XXXXXX | @usuario_github2 |
+| Omar Boquiño Navarro | S23013990 | @usuario_github1 | | Jose de Jesus Ibarra Guzman | S23013916 | @usuario_github2 | | Marco Antonio Morales González | S23013998 | @Mark0-9843 | | Nombre Completo Alumno 4 | S20XXXXXX | @usuario_github2 |
