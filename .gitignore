@@ -1,0 +1,66 @@
+# ==============================================================================
+# .gitignore para la EE: Temas Selectos de IIE II (POO) - Universidad Veracruzana
+# Diseñado para proyectos de C++, Python y Diseño de Hardware (KiCad, Proteus, etc.)
+# ==============================================================================
+
+# --- Archivos del Sistema Operativo ---
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# --- Archivos Temporales y Caché de Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.pytest_cache/
+.venv/
+venv/
+ENV/
+
+# --- Compilación y Ejecutables de C++ ---
+# Evita subir archivos binarios pesados que distorsionen el analizador de contribuciones
+*.exe
+*.out
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.gch
+*.pdb
+*.ilk
+
+# Carpetas de salida comunes de compilación (IDEs como Code::Blocks o Visual Studio)
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+.objs/
+.dep/
+*.layout
+*.depend
+
+# --- Editores e IDEs (VS Code, Notepad++, etc.) ---
+.vscode/
+.idea/
+*.workspace
+*.suo
+*.user
+*.session
+
+# --- Respaldos y Temporales de Hardware (KiCad, Proteus, etc.) ---
+# KiCad (evita saturar el repositorio con respaldos de esquemáticos y placas)
+*-backups/
+_autosave-*
+*.kicad_prl
+*.kicad_pcb-bak
+*.sch-bak
+
+# Proteus y otros simuladores
+*.pwi
+*.dbk
+*.DBK
+*.bak
