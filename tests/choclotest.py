@@ -13,4 +13,4 @@ def main(): #Funcion para el ingreso de datos
     print(f"Tus datos son:  {Nombre}, {Peso}, {EstadoCivil}, {Edad}, {DomicilioFiscal}, {Estadoderesidencia}") # Impresion de los datos en la consola
 
 if __name__ == "__main__": #Iniciacion del codigo
-    main()
+    main()  
