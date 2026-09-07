@@ -1,4 +1,5 @@
 """
+reactor_sim.py
 EE: Programación Orientada a Objetos (UV)
 Ejemplo Integrador v7: Panel HMI Estático con Limpieza de Pantalla y Registro de Eventos
 Este script simula un panel de control industrial estático (no scroll) mediante borrado de pantalla.
@@ -142,25 +143,25 @@ def main():
         nombre="termometro",
         variable_fisica="Temperatura",
         rango_min=0.0,
-        rango_max=100.0,
+        rango_max=150.0,
         sensibilidad=0.01,
         decimales_medicion=3,
         unidad="°C"
     )
 
-    fotocelda = Sensor(
-        nombre="fotocelda",
-        variable_fisica="Luminosidad",
+    presion = Sensor(
+        nombre="Presion",
+        variable_fisica="Presion",
         rango_min=0.0,
-        rango_max=100.0,
+        rango_max=15.0,
         sensibilidad=0.001,
         decimales_medicion=2,
-        unidad="Lumenes"
+        unidad="Bar"
     )
 
     # Diccionarios de mapeo para enlazar los comandos de texto con las instancias reales
     actuadores = {"calefactor":  Bomba_de_Enfriamiento, "enfriador": Válvula_de_Alivio}
-    sensores = {"termometro": termometro, "fotocelda": fotocelda}
+    sensores = {"termometro": termometro, "Presion": presion}
 
     # Bucle interactivo directo
     while True:
