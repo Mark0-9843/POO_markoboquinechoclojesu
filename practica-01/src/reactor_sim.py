@@ -134,8 +134,8 @@ def mostrar_interfaz_hmi(actuadores, sensores):
 # ==============================================================================
 def main():
     # 3. Creación de dos objetos de la clase Actuador
-    calefactor = Actuador("Calefactor")
-    enfriador = Actuador("Enfriador")
+    Bomba_de_Enfriamiento = Actuador("Bomba de Enfriamiento")
+    Válvula_de_Alivio = Actuador("Válvula de Alivio")
 
     # 3. Creación de dos objetos de la clase Sensor
     termometro = Sensor(
@@ -159,7 +159,7 @@ def main():
     )
 
     # Diccionarios de mapeo para enlazar los comandos de texto con las instancias reales
-    actuadores = {"calefactor": calefactor, "enfriador": enfriador}
+    actuadores = {"calefactor":  Bomba_de_Enfriamiento, "enfriador": Válvula_de_Alivio}
     sensores = {"termometro": termometro, "fotocelda": fotocelda}
 
     # Bucle interactivo directo
