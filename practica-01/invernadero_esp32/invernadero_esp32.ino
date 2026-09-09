@@ -1,86 +1,90 @@
-#include <Arduino.h>
+#include <Arduino.h> // Librería principal para el framework de Arduino
 
-// Definición estricta de pines
-const int PIN_TEMP = 34;   // Sensor Térmico (ADC)
-const int PIN_LDR = 32;    // Sensor LDR (ADC)
-const int PIN_FAN = 18;    // Ventilador (PWM)
-const int PIN_LED = 19;    // LED de Potencia (PWM)
+// Pines asignados a cada periférico
+const int PIN_TEMP = 34;   // Entrada analógica (ADC) para sensor LM35
+const int PIN_LDR = 32;    // Entrada analógica (ADC) para la fotorresistencia
+const int PIN_FAN = 18;    // Salida PWM hacia el driver del ventilador
+const int PIN_LED = 19;    // Salida PWM hacia el driver/transistor del LED
 
-// Configuración de canales PWM 
-const int FREQ_PWM = 5000;    // Frecuencia de 5 kHz
-const int RESOLUTION = 8;     // Resolución de 8 bits (0 - 255)
-const int CHANNEL_FAN = 0;    // Canal PWM para ventilador
-const int CHANNEL_LED = 1;    // Canal PWM para LED
+// Parámetros para el periférico LEDC (PWM del ESP32)
+const int FREQ_PWM = 5000;    // Frecuencia de conmutación a 5 kHz
+const int RESOLUTION = 8;     // Resolución de 8 bits (rango 0 a 255)
+const int CHANNEL_FAN = 0;    // Canal PWM 0 dedicado al ventilador
+const int CHANNEL_LED = 1;    // Canal PWM 1 dedicado al LED
 
-unsigned long lastMillis = 0;
-const long interval = 2000;   // Intervalo de telemetría (2 segundos)
+// Control de tiempo sin delay()
+unsigned long lastMillis = 0; // Guarda la marca de tiempo de la última telemetría
+const long interval = 2000;   // Tiempo de espera entre envíos (2 segundos)
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200); // Inicia comunicación serie a 115200 baudios
 
-  // Configuración de entradas analógicas 
-  pinMode(PIN_TEMP, INPUT);
-  pinMode(PIN_LDR, INPUT);
-  analogSetAttenuation(ADC_11db); // Rango completo de 0 a 3.3V
+  // Configuración de pines de entrada
+  pinMode(PIN_TEMP, INPUT); // Configura pin de temperatura como entrada
+  pinMode(PIN_LDR, INPUT);  // Configura pin del LDR como entrada
+  analogSetAttenuation(ADC_11db); // Escala el ADC para medir hasta ~3.3V
 
-  // Configuración de periféricos PWM (ledc)
-  ledcSetup(CHANNEL_FAN, FREQ_PWM, RESOLUTION);
-  ledcAttachPin(PIN_FAN, CHANNEL_FAN);
+  // Inicializa y asocia el PWM del ventilador
+  ledcSetup(CHANNEL_FAN, FREQ_PWM, RESOLUTION); // Configura frecuencia y resolución en canal 0
+  ledcAttachPin(PIN_FAN, CHANNEL_FAN);          // Asigna el pin 18 al canal 0
 
-  ledcSetup(CHANNEL_LED, FREQ_PWM, RESOLUTION);
-  ledcAttachPin(PIN_LED, CHANNEL_LED);
+  // Inicializa y asocia el PWM del LED
+  ledcSetup(CHANNEL_LED, FREQ_PWM, RESOLUTION); // Configura frecuencia y resolución en canal 1
+  ledcAttachPin(PIN_LED, CHANNEL_LED);          // Asigna el pin 19 al canal 1
 
-  // Estado inicial apagado
-  ledcWrite(CHANNEL_FAN, 0);
-  ledcWrite(CHANNEL_LED, 0);
+  // Seguridad: arranca ambos actuadores apagados (duty cycle en 0)
+  ledcWrite(CHANNEL_FAN, 0); // Apaga ventilador
+  ledcWrite(CHANNEL_LED, 0); // Apaga LED
 }
 
 void loop() {
-  // 1. Lectura de Sensores
-  int rawTemp = analogRead(PIN_TEMP);
-  // Conversión aproximada para LM35 (Voltaje a Temperatura: (raw / 4095) * 3.3V * 100)
+  // --- 1. Lectura y conversión de sensores ---
+  int rawTemp = analogRead(PIN_TEMP); // Lee valor crudo del ADC (0 a 4095)
+  // Conversión a voltios y luego a °C (LM35 entrega 10mV/°C)
   float temperatura = (rawTemp * 3.3 / 4095.0) * 100.0; 
 
-  int ldrValue = analogRead(PIN_LDR); // Rango 0 - 4095
+  int ldrValue = analogRead(PIN_LDR); // Lee nivel de luz crudo (0 a 4095)
 
-  // 2. Algoritmo de Control Físico
-  // Gestión Térmica: Ventilador al 100% si > 30°C
+  // --- 2. Lógica de control ---
+  // Control ON/OFF para ventilador según umbral de temperatura
   if (temperatura > 30.0) {
-    ledcWrite(CHANNEL_FAN, 255); // 100% Duty Cycle
+    ledcWrite(CHANNEL_FAN, 255); // Si supera 30°C, ventilador a máxima potencia
   } else {
-    ledcWrite(CHANNEL_FAN, 0);   // Apagado
+    ledcWrite(CHANNEL_FAN, 0);   // Si baja de 30°C, se apaga
   }
 
-  // Gestión Lumínica: Control proporcional inverso
-  // A menor luz (LDR bajo), mayor intensidad del LED
-  int ledPWM = map(ldrValue, 0, 4095, 255, 0);
-  ledPWM = constrain(ledPWM, 0, 255);
-  ledcWrite(CHANNEL_LED, ledPWM);
+  // Control proporcional inverso: a menos luz ambiental, más potencia en el LED
+  int ledPWM = map(ldrValue, 0, 4095, 255, 0); // Invierte la escala de 12 bits a 8 bits
+  ledPWM = constrain(ledPWM, 0, 255);          // Limita el valor para evitar desbordes
+  ledcWrite(CHANNEL_LED, ledPWM);              // Aplica el ciclo de trabajo al LED
 
-  // 3. Procesamiento de Comandos Seriales (Diagnóstico Manual)
-  if (Serial.available() > 0) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
+  // --- 3. Comandos por consola serie ---
+  if (Serial.available() > 0) { // Revisa si hay bytes en el buffer serie
+    String command = Serial.readStringUntil('\n'); // Lee el comando hasta el salto de línea
+    command.trim(); // Elimina espacios o caracteres \r sobrantes
     
-    if (command.equalsIgnoreCase("STATUS")) {
+    // Procesa el comando ingresado
+    if (command.equalsIgnoreCase("STATUS")) { // Pide lectura manual bajo demanda
       enviarTelemetriaJSON(temperatura, ldrValue, ledPWM, (temperatura > 30.0 ? 255 : 0));
-    } else if (command.equalsIgnoreCase("HELP")) {
+    } else if (command.equalsIgnoreCase("HELP")) { // Muestra opciones disponibles
       Serial.println(F("Comandos disponibles: STATUS (Muestra telemetria en JSON)"));
     }
   }
 
-  // 4. Telemetría Periódica Automática (JSON)
-  if (millis() - lastMillis >= interval) {
-    lastMillis = millis();
-    enviarTelemetriaJSON(temperatura, ldrValue, ledPWM, (temperatura > 30.0 ? 255 : 0));
+  // --- 4. Envío periódico no bloqueante ---
+  if (millis() - lastMillis >= interval) { // Comprueba si ya pasaron los 2 segundos
+    lastMillis = millis(); // Actualiza la marca de tiempo
+    enviarTelemetriaJSON(temperatura, ldrValue, ledPWM, (temperatura > 30.0 ? 255 : 0)); // Envía paquete JSON
   }
 }
 
+// Función auxiliar para formatear y transmitir datos en formato JSON
 void enviarTelemetriaJSON(float temp, int ldr, int fanPWM, int statusFan) {
-  Serial.print("{");
-  Serial.print("\"temperatura_C\":"); Serial.print(temp, 2);
-  Serial.print(",\"ldr_raw\":"); Serial.print(ldr);
-  Serial.print(",\"led_pwm\":"); Serial.print(fanPWM);
-  Serial.print(",\"fan_pwm\":"); Serial.print(statusFan);
-  Serial.println("}");
+  Serial.print("{"); // Abre estructura JSON
+  Serial.print("\"temperatura_C\":"); Serial.print(temp, 2); // Imprime temperatura con 2 decimales
+  Serial.print(",\"ldr_raw\":"); Serial.print(ldr);          // Imprime valor ADC del LDR
+  Serial.print(",\"led_pwm\":"); Serial.print(fanPWM);       // Imprime valor PWM del LED (parámetro fanPWM)
+  Serial.print(",\"fan_pwm\":"); Serial.print(statusFan);     // Imprime estado PWM del ventilador
+  Serial.println("}"); // Cierra estructura JSON con salto de línea
 }
+
