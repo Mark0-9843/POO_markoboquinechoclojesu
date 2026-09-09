@@ -1,10 +1,55 @@
-                      +-----------------------------------------+
-                      |                Actuador                 |
-                      +-----------------------------------------+
-                      | - nombre: str                           |
-                      | - estado: bool = False                  |
-                      +-----------------------------------------+
-                      | + __init__(nombre: str)                 |
-                      | + encender(): void                      |
-                      | + apagar(): void                        |
-                      +-----------------------------------------+
++--------------------------------+
+|            Actuador            |
++--------------------------------+
+| - nombre: str                  |
+| - estado: bool = False         |
++--------------------------------+
+| + __init__(nombre: str)        |
+| + encender(): void             |
+| + apagar(): void               |
++--------------------------------+
+
+
++--------------------------------------------+
+|            ActuadorProporcional            |
++--------------------------------------------+
+| - rango_operacion_min: float = 0.0         |
+| - rango_operacion_max: float = 100.0       |
+| - punto_operacion: float = 0.0             |
++--------------------------------------------+
+| + __init__(nombre: str)                    |
+| + ajustar(valor: float): void              |
+| + info(): str                              |
++--------------------------------------------+
+
+
++--------------------------------------+
+|           ActuadorDigital            |
++--------------------------------------+
+| - punto_operacion: int = 0           |
++--------------------------------------+
+| + __init__(nombre: str)              |
+| + encender(): void                   |
+| + apagar(): void                     |
+| + ajustar(valor: float): void        |
+| + info(): str                        |
++--------------------------------------+
+
+
++------------------------------------------------------------------------+
+|                                 Sensor                                 |
++------------------------------------------------------------------------+
+| - nombre: str                                                          |
+| - variable_fisica: str                                                 |
+| - rango_min: float                                                     |
+| - rango_max: float                                                     |
+| - sensibilidad: float                                                  |
+| - decimales_medicion: int                                              |
+| - unidad: str                                                          |
++------------------------------------------------------------------------+
+| + __init__(nombre: str, variable_fisica: str, rango_min: float,        |
+|            rango_max: float, sensibilidad: float,                      |
+|            decimales_medicion: int, unidad: str)                       |
+| + leer_valor_actual(): float                                           |
+| + info(): str                                                          |
++------------------------------------------------------------------------+
