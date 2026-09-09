@@ -107,28 +107,37 @@ class Sensor:
 # INTERFAZ HMI (TABLERO DE CONTROL)
 # ==============================================================================
 def mostrar_interfaz_hmi(actuadores, sensores):
+    # Encabezado principal del panel de control
     print("=" * 90)
     print("                           PANEL DE CONTROL INDUSTRIAL HMI (ESTÁTICO)")
     print("=" * 90)
     
+    # Sección de actuadores: recorre el diccionario y muestra la info de cada uno
     print(" [ACTUADORES]")
     for key, act in actuadores.items():
+        # key = nombre/identificador del actuador, act = objeto actuador con método info()
         print(f"   ► [{key:<7}] {act.info()}")
     print("-" * 90)
     
+    # Sección de sensores: recorre el diccionario y muestra la info de cada uno
     print(" [SENSORES]")
     for key, sen in sensores.items():
+        # key = nombre/identificador del sensor, sen = objeto sensor con método info()
         print(f"   ► [{key:<10}] {sen.info()}")
     print("=" * 90)
     
+    # Sección de registro de eventos (log tipo SCADA/HMI)
     print(" [REGISTRO DE EVENTOS EN VIVO (SCADA/HMI)]")
     if not historial_eventos:
+        # Si la lista de eventos está vacía, se informa que no hay actividad
         print("   (Sin actividad reciente)")
     else:
+        # Si hay eventos registrados, se imprimen uno por uno
         for ev in historial_eventos:
             print(f"   {ev}")
     print("=" * 90)
     
+    # Sección de ayuda: lista de comandos que el usuario puede ejecutar
     print(" COMANDOS DISPONIBLES:")
     print("   • encender <actuador>       (Ej: encender bomba)")
     print("   • apagar <actuador>         (Ej: apagar valvula)")
