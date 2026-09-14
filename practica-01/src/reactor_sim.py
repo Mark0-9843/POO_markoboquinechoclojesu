@@ -139,7 +139,7 @@ def ejecutar_modo_automatico(actuadores, sensores, consigna_temp=50.0):
 
 
 # ==============================================================================
-# RUTINA DE INYECCIÓN DE FALLOS (MODO PRUEBAS) -> NUEVA FUNCIONALIDAD
+# RUTINA DE INYECCIÓN DE FALLOS (MODO PRUEBAS)
 # ==============================================================================
 def ejecutar_modo_pruebas(actuadores, sensores):
     """
@@ -178,11 +178,47 @@ def ejecutar_modo_pruebas(actuadores, sensores):
 
 
 # ==============================================================================
+# [!WARNING] INTERLOCKS DE SEGURIDAD (PRIORIDAD MÁXIMA DE EJECUCIÓN)
+# ==============================================================================
+def verificar_interlocks_seguridad(actuadores, sensores) -> bool:
+    """
+    Se evalúa en cada ciclo, sin importar el modo de operación activo.
+    Si Temperatura > 85.0 °C o Presión > 12.0 Bar, el sistema ignora
+    cualquier instrucción del operario y fuerza simultáneamente:
+      - Bomba de Enfriamiento al 100%
+      - Válvula de Alivio totalmente abierta
+    Devuelve True mientras la condición crítica siga activa (y por lo
+    tanto el control manual/automático debe permanecer bloqueado).
+    """
+    temp = sensores["termometro"].valor_actual
+    pres = sensores["presion"].valor_actual
+
+    if temp > 85.0 or pres > 12.0:
+        bomba = actuadores["bomba"]
+        valvula = actuadores["valvula"]
+
+        if bomba.punto_operacion != 100.0:
+            bomba.ajustar(100.0)
+        if valvula.punto_operacion != 1:
+            valvula.encender()
+
+        registrar_evento(
+            f"[🚨 INTERLOCK] Condición crítica (T={temp:.2f}°C, P={pres:.2f}Bar) -> "
+            f"Bomba forzada 100% / Válvula ABIERTA. Control del operario BLOQUEADO."
+        )
+        return True
+
+    return False
+
+
+# ==============================================================================
 # INTERFAZ HMI (TABLERO DE CONTROL)
 # ==============================================================================
-def mostrar_interfaz_hmi(actuadores, sensores, modo_operacion):
+def mostrar_interfaz_hmi(actuadores, sensores, modo_operacion, interlock_activo=False):
     print("=" * 95)
     print(f"            PANEL DE CONTROL INDUSTRIAL HMI - MODO: [{modo_operacion.upper()}]")
+    if interlock_activo:
+        print(" 🚨 INTERLOCK DE SEGURIDAD ACTIVO - CONTROL DEL OPERARIO BLOQUEADO 🚨".center(95))
     print("=" * 95)
     
     print(" [ACTUADORES]")
@@ -204,13 +240,14 @@ def mostrar_interfaz_hmi(actuadores, sensores, modo_operacion):
     print("=" * 95)
     
     print(" COMANDOS DISPONIBLES:")
-    # Se actualiza visualmente para mostrar el nuevo modo
     print("   • modo <manual/auto/pruebas> (Cambia el modo de operación)")
     print("   • encender <actuador>        (Ej: encender bomba)")
     print("   • apagar <actuador>          (Ej: apagar valvula)")
     print("   • ajustar <actuador> <val>   (Ej: ajustar bomba 75.5  O  ajustar valvula 1)")
     print("   • leer <sensor>              (Ej: leer termometro     O  leer presion)")
     print("   • terminar                   (Finaliza la simulación)")
+    if interlock_activo:
+        print("   ⚠ Interlock de seguridad activo: comandos de control desactivados.")
     print("=" * 95)
 
 
@@ -229,6 +266,7 @@ def main():
     sensores = {"termometro": termometro, "presion": presion}
 
     modo_operacion = "MANUAL"
+    interlock_activo = False
 
     while True:
         # Ejecución de los modos automatizados por ciclo
@@ -237,8 +275,12 @@ def main():
         elif modo_operacion == "PRUEBAS":
             ejecutar_modo_pruebas(actuadores, sensores)
 
+        # [!WARNING] Interlock de seguridad: se evalúa siempre, con prioridad
+        # sobre cualquier modo, y puede sobrescribir lo calculado arriba.
+        interlock_activo = verificar_interlocks_seguridad(actuadores, sensores)
+
         limpiar_pantalla()
-        mostrar_interfaz_hmi(actuadores, sensores, modo_operacion)
+        mostrar_interfaz_hmi(actuadores, sensores, modo_operacion, interlock_activo)
         
         try:
             entrada = input("Ingrese comando >> ").strip()
@@ -265,7 +307,6 @@ def main():
                 registrar_evento("[⚠️ ERROR] Uso: modo <manual/auto/pruebas>")
                 continue
             nuevo_modo = partes[1].upper()
-            # Se permite la entrada al nuevo MODO PRUEBAS
             if nuevo_modo in ["MANUAL", "AUTO", "PRUEBAS"]:
                 modo_operacion = nuevo_modo
                 registrar_evento(f"[🔄 SISTEMA] Modo de operación cambiado a: {modo_operacion}")
@@ -273,6 +314,9 @@ def main():
                 registrar_evento("[⚠️ ERROR] Modo no válido. Opciones: manual, auto, pruebas")
 
         elif comando == "encender":
+            if interlock_activo:
+                registrar_evento("[⚠️ DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
+                continue
             if modo_operacion == "AUTO":
                 registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
                 continue
@@ -286,6 +330,9 @@ def main():
                 registrar_evento(f"[⚠️ ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
 
         elif comando == "apagar":
+            if interlock_activo:
+                registrar_evento("[⚠️ DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
+                continue
             if modo_operacion == "AUTO":
                 registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
                 continue
@@ -299,6 +346,9 @@ def main():
                 registrar_evento(f"[⚠️ ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
 
         elif comando == "ajustar":
+            if interlock_activo:
+                registrar_evento("[⚠️ DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
+                continue
             if modo_operacion == "AUTO":
                 registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
                 continue
