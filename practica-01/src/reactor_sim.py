@@ -22,7 +22,7 @@ class Actuador:
     """Clase base para todos los actuadores."""
     def __init__(self, nombre: str):
         self.nombre = nombre
-        self.estado = False              # Estado lógico de encendido: False = OFF, True = ON
+        self.estado = False
 
     def encender(self):
         self.estado = True
@@ -43,6 +43,10 @@ class ActuadorProporcional(Actuador):
     def ajustar(self, valor: float):
         if self.rango_operacion_min <= valor <= self.rango_operacion_max:
             self.punto_operacion = valor
+            if valor > 0:
+                self.estado = True
+            else:
+                self.estado = False
             registrar_evento(f"[⚙] {self.nombre} -> Punto de operación ajustado al {self.punto_operacion:.1f}%")
         else:
             registrar_evento(f"[⚠️ ERROR] {self.nombre} -> Valor {valor}% fuera de rango (0% - 100%).")
@@ -90,55 +94,77 @@ class Sensor:
         self.sensibilidad = sensibilidad
         self.decimales_medicion = decimales_medicion
         self.unidad = unidad
+        # Valor dinámico interno para simulación del proceso
+        self.valor_actual = round((rango_min + rango_max) / 3.0, decimales_medicion)
 
     def leer_valor_actual(self) -> float:
-        valor_simulado = random.uniform(self.rango_min, self.rango_max)
-        valor_redondeado = round(valor_simulado, self.decimales_medicion)
+        # En variables no controladas directamente (presión) se añade ruido de proceso
+        if self.variable_fisica != "Temperatura":
+            self.valor_actual = round(random.uniform(self.rango_min, self.rango_max * 0.5), self.decimales_medicion)
         
-        lectura_str = f"{valor_redondeado:.{self.decimales_medicion}f} {self.unidad}"
+        lectura_str = f"{self.valor_actual:.{self.decimales_medicion}f} {self.unidad}"
         registrar_evento(f"[📊 LECTURA] {self.nombre}: {lectura_str} (Var: {self.variable_fisica})")
-        return valor_redondeado
+        return self.valor_actual
 
     def info(self) -> str:
         return f"{self.nombre:<20} | Var: {self.variable_fisica:<18} | Rango: [{self.rango_min:>4.1f} - {self.rango_max:>5.1f}] {self.unidad:<5} | Sensibilidad: {self.sensibilidad} | Dec: {self.decimales_medicion}"
 
 
 # ==============================================================================
+# CONTROL AUTOMÁTICO
+# ==============================================================================
+def ejecutar_modo_automatico(actuadores, sensores, consigna_temp=50.0):
+    """
+    Algoritmo de estabilidad dinámica:
+    ΔT = (+1.5°C) - (0.05°C × % OperaciónBomba)
+    """
+    bomba = actuadores["bomba"]
+    sensor_temp = sensores["termometro"]
+
+    # Control proporcional simple hacia una temperatura objetivo segura (50.0 °C)
+    error = sensor_temp.valor_actual - consigna_temp
+    # Punto de equilibrio base: 1.5 / 0.05 = 30.0%
+    nuevo_porcentaje = 30.0 + (error * 2.0)
+    nuevo_porcentaje = max(0.0, min(100.0, nuevo_porcentaje))
+    
+    bomba.ajustar(nuevo_porcentaje)
+
+    # Cálculo dinámico de ΔT según la fórmula
+    delta_t = 1.5 - (0.05 * bomba.punto_operacion)
+    sensor_temp.valor_actual = round(sensor_temp.valor_actual + delta_t, sensor_temp.decimales_medicion)
+
+    registrar_evento(f"[🤖 AUTO] Bomba al {bomba.punto_operacion:.1f}% | ΔT: {delta_t:+.2f}°C | Temp: {sensor_temp.valor_actual:.2f}°C")
+
+
+# ==============================================================================
 # INTERFAZ HMI (TABLERO DE CONTROL)
 # ==============================================================================
-def mostrar_interfaz_hmi(actuadores, sensores):
-    # Encabezado principal del panel de control
+def mostrar_interfaz_hmi(actuadores, sensores, modo_operacion):
     print("=" * 90)
-    print("                           PANEL DE CONTROL INDUSTRIAL HMI (ESTÁTICO)")
+    print(f"            PANEL DE CONTROL INDUSTRIAL HMI - MODO: [{modo_operacion.upper()}]")
     print("=" * 90)
     
-    # Sección de actuadores: recorre el diccionario y muestra la info de cada uno
     print(" [ACTUADORES]")
     for key, act in actuadores.items():
-        # key = nombre/identificador del actuador, act = objeto actuador con método info()
         print(f"   ► [{key:<7}] {act.info()}")
     print("-" * 90)
     
-    # Sección de sensores: recorre el diccionario y muestra la info de cada uno
     print(" [SENSORES]")
     for key, sen in sensores.items():
-        # key = nombre/identificador del sensor, sen = objeto sensor con método info()
-        print(f"   ► [{key:<10}] {sen.info()}")
+        # Se muestra la lectura instantánea en el panel
+        print(f"   ► [{key:<10}] {sen.info()} | Lectura: {sen.valor_actual} {sen.unidad}")
     print("=" * 90)
     
-    # Sección de registro de eventos (log tipo SCADA/HMI)
     print(" [REGISTRO DE EVENTOS EN VIVO (SCADA/HMI)]")
     if not historial_eventos:
-        # Si la lista de eventos está vacía, se informa que no hay actividad
         print("   (Sin actividad reciente)")
     else:
-        # Si hay eventos registrados, se imprimen uno por uno
         for ev in historial_eventos:
             print(f"   {ev}")
     print("=" * 90)
     
-    # Sección de ayuda: lista de comandos que el usuario puede ejecutar
     print(" COMANDOS DISPONIBLES:")
+    print("   • modo <manual/auto>        (Cambia el modo de operación)")
     print("   • encender <actuador>       (Ej: encender bomba)")
     print("   • apagar <actuador>         (Ej: apagar valvula)")
     print("   • ajustar <actuador> <val>  (Ej: ajustar bomba 75.5  O  ajustar valvula 1)")
@@ -151,20 +177,25 @@ def mostrar_interfaz_hmi(actuadores, sensores):
 # BUCLE INTERACTIVO PRINCIPAL
 # ==============================================================================
 def main():
-    # Instanciación aplicando Polimorfismo
     Bomba_de_Enfriamiento = ActuadorProporcional("Bomba de Enfriamiento")
     Valvula_de_Alivio = ActuadorDigital("Válvula de Alivio")
 
     termometro = Sensor("Termometro", "Temperatura", 0.0, 150.0, 0.01, 3, "°C")
+    termometro.valor_actual = 0
     presion = Sensor("Presion", "Presion", 0.0, 15.0, 0.001, 2, "Bar")
 
-    # Corrección de mapeo para coincidir con el uso real en terminal
     actuadores = {"bomba": Bomba_de_Enfriamiento, "valvula": Valvula_de_Alivio}
     sensores = {"termometro": termometro, "presion": presion}
 
+    modo_operacion = "MANUAL"
+
     while True:
+        # En modo automático, se ejecuta la rutina dinámica en cada iteración del bucle
+        if modo_operacion == "AUTO":
+            ejecutar_modo_automatico(actuadores, sensores)
+
         limpiar_pantalla()
-        mostrar_interfaz_hmi(actuadores, sensores)
+        mostrar_interfaz_hmi(actuadores, sensores, modo_operacion)
         
         try:
             entrada = input("Ingrese comando >> ").strip()
@@ -185,7 +216,22 @@ def main():
 
         comando = partes[0].lower()
 
-        if comando == "encender":
+        # Cambio de Modo de Operación
+        if comando == "modo":
+            if len(partes) < 2:
+                registrar_evento("[⚠️ ERROR] Uso: modo <manual/auto>")
+                continue
+            nuevo_modo = partes[1].upper()
+            if nuevo_modo in ["MANUAL", "AUTO"]:
+                modo_operacion = nuevo_modo
+                registrar_evento(f"[🔄 SISTEMA] Modo de operación cambiado a: {modo_operacion}")
+            else:
+                registrar_evento("[⚠️ ERROR] Modo no válido. Opciones: manual, auto")
+
+        elif comando == "encender":
+            if modo_operacion == "AUTO":
+                registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
+                continue
             if len(partes) < 2:
                 registrar_evento("[⚠️ ERROR] Especifica el actuador. Uso: encender <bomba/valvula>")
                 continue
@@ -196,6 +242,9 @@ def main():
                 registrar_evento(f"[⚠️ ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
 
         elif comando == "apagar":
+            if modo_operacion == "AUTO":
+                registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
+                continue
             if len(partes) < 2:
                 registrar_evento("[⚠️ ERROR] Especifica el actuador. Uso: apagar <bomba/valvula>")
                 continue
@@ -206,6 +255,9 @@ def main():
                 registrar_evento(f"[⚠️ ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
 
         elif comando == "ajustar":
+            if modo_operacion == "AUTO":
+                registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
+                continue
             if len(partes) < 3:
                 registrar_evento("[⚠️ ERROR] Faltan parámetros. Uso: ajustar <bomba/valvula> <valor>")
                 continue
