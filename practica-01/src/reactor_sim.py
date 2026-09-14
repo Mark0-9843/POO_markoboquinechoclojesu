@@ -32,6 +32,7 @@ class Actuador:
         self.estado = False
         registrar_evento(f"[-] {self.nombre} -> Estado cambiado a: APAGADO (OFF)")
 
+
 class ActuadorProporcional(Actuador):
     """Actuador que opera en un rango analógico de 0% a 100%."""
     def __init__(self, nombre: str):
@@ -54,6 +55,7 @@ class ActuadorProporcional(Actuador):
     def info(self) -> str:
         estado_str = "ON" if self.estado else "OFF"
         return f"{self.nombre:<20} | Estado: {estado_str:<3} | Punto Op: {self.punto_operacion:>5.1f}% | Rango: [0.0% - 100.0%]"
+
 
 class ActuadorDigital(Actuador):
     """Actuador que opera de manera binaria (0 o 1)."""
@@ -137,23 +139,61 @@ def ejecutar_modo_automatico(actuadores, sensores, consigna_temp=50.0):
 
 
 # ==============================================================================
+# RUTINA DE INYECCIÓN DE FALLOS (MODO PRUEBAS) -> NUEVA FUNCIONALIDAD
+# ==============================================================================
+def ejecutar_modo_pruebas(actuadores, sensores):
+    """
+    Rutina que inyecta fallos aleatorios en el sistema para validar
+    límites operativos y mecanismos de seguridad del HMI.
+    """
+    fallos_posibles = ["sobrecalentamiento", "sobrepresion", "falla_bomba", "falla_valvula", "sin_novedad"]
+    fallo = random.choice(fallos_posibles)
+
+    if fallo == "sobrecalentamiento":
+        # Fuerza la temperatura por encima de los 150.0 °C
+        temp_critica = round(random.uniform(151.0, 180.0), sensores["termometro"].decimales_medicion)
+        sensores["termometro"].valor_actual = temp_critica
+        registrar_evento(f"[🔥 ALERTA PRUEBA] Límite térmico excedido. Temp inyectada: {temp_critica} °C")
+
+    elif fallo == "sobrepresion":
+        # Fuerza la presión por encima de los 15.0 Bar
+        pres_critica = round(random.uniform(15.5, 25.0), sensores["presion"].decimales_medicion)
+        sensores["presion"].valor_actual = pres_critica
+        registrar_evento(f"[💥 ALERTA PRUEBA] Límite barométrico excedido. Presión inyectada: {pres_critica} Bar")
+
+    elif fallo == "falla_bomba":
+        # Envía un valor inválido a la bomba de enfriamiento (> 100%)
+        falla_porcentaje = round(random.uniform(105.0, 150.0), 1)
+        registrar_evento("[⚙️ PRUEBA] Inyectando fallo: Intentando modular bomba fuera de límite...")
+        actuadores["bomba"].ajustar(falla_porcentaje)
+
+    elif fallo == "falla_valvula":
+        # Envía un valor lógico inválido a la válvula digital (diferente de 0 o 1)
+        falla_logica = random.choice([-1, 2, 5, 9])
+        registrar_evento("[🚰 PRUEBA] Inyectando fallo: Valor lógico no reconocido en válvula...")
+        actuadores["valvula"].ajustar(falla_logica)
+    
+    elif fallo == "sin_novedad":
+        registrar_evento("[🧪 PRUEBA] Monitoreo estable. Sin anomalías inyectadas en este ciclo.")
+
+
+# ==============================================================================
 # INTERFAZ HMI (TABLERO DE CONTROL)
 # ==============================================================================
 def mostrar_interfaz_hmi(actuadores, sensores, modo_operacion):
-    print("=" * 90)
+    print("=" * 95)
     print(f"            PANEL DE CONTROL INDUSTRIAL HMI - MODO: [{modo_operacion.upper()}]")
-    print("=" * 90)
+    print("=" * 95)
     
     print(" [ACTUADORES]")
     for key, act in actuadores.items():
         print(f"   ► [{key:<7}] {act.info()}")
-    print("-" * 90)
+    print("-" * 95)
     
     print(" [SENSORES]")
     for key, sen in sensores.items():
-        # Se muestra la lectura instantánea en el panel
         print(f"   ► [{key:<10}] {sen.info()} | Lectura: {sen.valor_actual} {sen.unidad}")
-    print("=" * 90)
+    print("=" * 95)
     
     print(" [REGISTRO DE EVENTOS EN VIVO (SCADA/HMI)]")
     if not historial_eventos:
@@ -161,16 +201,17 @@ def mostrar_interfaz_hmi(actuadores, sensores, modo_operacion):
     else:
         for ev in historial_eventos:
             print(f"   {ev}")
-    print("=" * 90)
+    print("=" * 95)
     
     print(" COMANDOS DISPONIBLES:")
-    print("   • modo <manual/auto>        (Cambia el modo de operación)")
-    print("   • encender <actuador>       (Ej: encender bomba)")
-    print("   • apagar <actuador>         (Ej: apagar valvula)")
-    print("   • ajustar <actuador> <val>  (Ej: ajustar bomba 75.5  O  ajustar valvula 1)")
-    print("   • leer <sensor>             (Ej: leer termometro     O  leer presion)")
-    print("   • terminar                  (Finaliza la simulación)")
-    print("=" * 90)
+    # Se actualiza visualmente para mostrar el nuevo modo
+    print("   • modo <manual/auto/pruebas> (Cambia el modo de operación)")
+    print("   • encender <actuador>        (Ej: encender bomba)")
+    print("   • apagar <actuador>          (Ej: apagar valvula)")
+    print("   • ajustar <actuador> <val>   (Ej: ajustar bomba 75.5  O  ajustar valvula 1)")
+    print("   • leer <sensor>              (Ej: leer termometro     O  leer presion)")
+    print("   • terminar                   (Finaliza la simulación)")
+    print("=" * 95)
 
 
 # ==============================================================================
@@ -190,9 +231,11 @@ def main():
     modo_operacion = "MANUAL"
 
     while True:
-        # En modo automático, se ejecuta la rutina dinámica en cada iteración del bucle
+        # Ejecución de los modos automatizados por ciclo
         if modo_operacion == "AUTO":
             ejecutar_modo_automatico(actuadores, sensores)
+        elif modo_operacion == "PRUEBAS":
+            ejecutar_modo_pruebas(actuadores, sensores)
 
         limpiar_pantalla()
         mostrar_interfaz_hmi(actuadores, sensores, modo_operacion)
@@ -219,14 +262,15 @@ def main():
         # Cambio de Modo de Operación
         if comando == "modo":
             if len(partes) < 2:
-                registrar_evento("[⚠️ ERROR] Uso: modo <manual/auto>")
+                registrar_evento("[⚠️ ERROR] Uso: modo <manual/auto/pruebas>")
                 continue
             nuevo_modo = partes[1].upper()
-            if nuevo_modo in ["MANUAL", "AUTO"]:
+            # Se permite la entrada al nuevo MODO PRUEBAS
+            if nuevo_modo in ["MANUAL", "AUTO", "PRUEBAS"]:
                 modo_operacion = nuevo_modo
                 registrar_evento(f"[🔄 SISTEMA] Modo de operación cambiado a: {modo_operacion}")
             else:
-                registrar_evento("[⚠️ ERROR] Modo no válido. Opciones: manual, auto")
+                registrar_evento("[⚠️ ERROR] Modo no válido. Opciones: manual, auto, pruebas")
 
         elif comando == "encender":
             if modo_operacion == "AUTO":
