@@ -18,37 +18,42 @@ class Actuador:
     """Clase base para todos los actuadores."""
     def __init__(self, nombre: str):
         self.nombre = nombre
-        self.estado = False
+        self.estado = False # Inicializa el actuador apagado por defecto
 
     def encender(self):
-        self.estado = True
+        self.estado = True # Cambia el estado interno a encendido
         registrar_evento(f"[+] {self.nombre} -> Estado cambiado a: ENCENDIDO (ON)")
 
     def apagar(self):
-        self.estado = False
+        self.estado = False # Cambia el estado interno a apagado
         registrar_evento(f"[-] {self.nombre} -> Estado cambiado a: APAGADO (OFF)")
 
 
 class ActuadorProporcional(Actuador):
     """Actuador que opera en un rango analógico de 0% a 100%."""
     def __init__(self, nombre: str):
-        super().__init__(nombre)
+        super().__init__(nombre) # Llama al constructor de la clase base
+        # Define los límites y el valor actual (inicia en 0)
         self.rango_operacion_min = 0.0
         self.rango_operacion_max = 100.0
         self.punto_operacion = 0.0
 
     def ajustar(self, valor: float):
+        # Valida que el valor esté dentro del rango permitido (0 - 100)
         if self.rango_operacion_min <= valor <= self.rango_operacion_max:
             self.punto_operacion = valor
+            # Se considera "encendido" si el valor es mayor a 0
             if valor > 0:
                 self.estado = True
             else:
                 self.estado = False
             registrar_evento(f"[⚙] {self.nombre} -> Punto de operación ajustado al {self.punto_operacion:.1f}%")
         else:
+            # Manejo de error si el valor está fuera de límite
             registrar_evento(f"[⚠️ ERROR] {self.nombre} -> Valor {valor}% fuera de rango (0% - 100%).")
 
     def info(self) -> str:
+        # Retorna una cadena con los datos del actuador tabulados
         estado_str = "ON" if self.estado else "OFF"
         return f"{self.nombre:<20} | Estado: {estado_str:<3} | Punto Op: {self.punto_operacion:>5.1f}% | Rango: [0.0% - 100.0%]"
 
@@ -57,17 +62,18 @@ class ActuadorDigital(Actuador):
     """Actuador que opera de manera binaria (0 o 1)."""
     def __init__(self, nombre: str):
         super().__init__(nombre)
-        self.punto_operacion = 0
+        self.punto_operacion = 0 # Inicia en 0 (apagado)
 
     def encender(self):
-        super().encender()
-        self.punto_operacion = 1
+        super().encender() # Usa la lógica de la clase base
+        self.punto_operacion = 1 # Actualiza su valor numérico
 
     def apagar(self):
-        super().apagar()
-        self.punto_operacion = 0
+        super().apagar() # Usa la lógica de la clase base
+        self.punto_operacion = 0 # Actualiza su valor numérico
 
     def ajustar(self, valor: float):
+        # Restringe la entrada estrictamente a valores booleanos (1 o 0)
         if valor == 1:
             self.encender()
         elif valor == 0:
@@ -76,12 +82,15 @@ class ActuadorDigital(Actuador):
             registrar_evento(f"[⚠️ ERROR] {self.nombre} -> Es digital. Solo acepta valores de 0 o 1.")
 
     def info(self) -> str:
+        # Retorna los datos formateados específicos para actuadores digitales
         estado_str = "ON" if self.estado else "OFF"
         return f"{self.nombre:<20} | Estado: {estado_str:<3} | Valor:    {self.punto_operacion:>3} | Rango: [0 / 1 (Digital)]"
 
 
 class Sensor:
+    """Clase para simular el comportamiento de un sensor."""
     def __init__(self, nombre: str, variable_fisica: str, rango_min: float, rango_max: float, sensibilidad: float, decimales_medicion: int, unidad: str):
+        # Asigna los parámetros iniciales del sensor
         self.nombre = nombre
         self.variable_fisica = variable_fisica
         self.rango_min = rango_min
@@ -89,19 +98,22 @@ class Sensor:
         self.sensibilidad = sensibilidad
         self.decimales_medicion = decimales_medicion
         self.unidad = unidad
+        # Calcula un valor inicial aleatorio dentro del primer tercio del rango
         self.valor_actual = round((rango_min + rango_max) / 3.0, decimales_medicion)
 
     def leer_valor_actual(self) -> float:
+        # Simula una lectura aleatoria para sensores que NO sean de temperatura
         if self.variable_fisica != "Temperatura":
             self.valor_actual = round(random.uniform(self.rango_min, self.rango_max * 0.5), self.decimales_medicion)
 
+        # Formatea el valor y registra el evento de lectura
         lectura_str = f"{self.valor_actual:.{self.decimales_medicion}f} {self.unidad}"
         registrar_evento(f"[📊 LECTURA] {self.nombre}: {lectura_str} (Var: {self.variable_fisica})")
         return self.valor_actual
 
     def info(self) -> str:
+        # Retorna una cadena con la información detallada del sensor formateada
         return f"{self.nombre:<20} | Var: {self.variable_fisica:<18} | Rango: [{self.rango_min:>4.1f} - {self.rango_max:>5.1f}] {self.unidad:<5} | Sensibilidad: {self.sensibilidad} | Dec: {self.decimales_medicion}"
-
 
 def ejecutar_modo_automatico(actuadores, sensores, consigna_temp=50.0):
     """
