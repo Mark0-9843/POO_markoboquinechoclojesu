@@ -236,125 +236,153 @@ def mostrar_interfaz_hmi(actuadores, sensores, modo_operacion, interlock_activo=
 
 
 def main():
+    # Instanciacion de los actuadores del sistema
     Bomba_de_Enfriamiento = ActuadorProporcional("Bomba de Enfriamiento")
     Valvula_de_Alivio = ActuadorDigital("Válvula de Alivio")
 
+    # Configuracion de sensores con sus rangos, resolucion y unidades
     termometro = Sensor("Termometro", "Temperatura", 0.0, 150.0, 0.01, 3, "°C")
     termometro.valor_actual = 0
     presion = Sensor("Presion", "Presion", 0.0, 15.0, 0.001, 2, "Bar")
 
+    # Diccionarios para agrupar dispositivos y acceder a ellos por clave
     actuadores = {"bomba": Bomba_de_Enfriamiento, "valvula": Valvula_de_Alivio}
     sensores = {"termometro": termometro, "presion": presion}
 
+    # Estado inicial de control e interlocks
     modo_operacion = "MANUAL"
     interlock_activo = False
 
+    # Bucle principal de ejecucion
     while True:
+        # Ejecuta la logica correspondiente al modo de trabajo actual
         if modo_operacion == "AUTO":
             ejecutar_modo_automatico(actuadores, sensores)
         elif modo_operacion == "PRUEBAS":
             ejecutar_modo_pruebas(actuadores, sensores)
 
+        # Evalua condiciones criticas para disparar interlocks
         interlock_activo = verificar_interlocks_seguridad(actuadores, sensores)
 
+        # Refresco de la consola y renderizado del panel HMI
         limpiar_pantalla()
         mostrar_interfaz_hmi(actuadores, sensores, modo_operacion, interlock_activo)
 
+        # Captura de entrada del usuario con manejo de terminacion manual
         try:
             entrada = input("Ingrese comando >> ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n\n[+] Programa terminado.")
             break
 
+        # Descarta entradas vacias
         if not entrada:
             continue
 
+        # Finalizacion segura del programa
         if entrada.lower() == "terminar":
             print("\n[+] Cerrando sistema de control... Programa finalizado con éxito.")
             break
 
+        # Separacion del comando y sus argumentos
         partes = entrada.split()
         if len(partes) == 0:
             continue
 
         comando = partes[0].lower()
 
+        # Gestion de transicion entre modos de operacion
         if comando == "modo":
             if len(partes) < 2:
-                registrar_evento("[⚠️ ERROR] Uso: modo <manual/auto/pruebas>")
+                registrar_evento("[ERROR] Uso: modo <manual/auto/pruebas>")
                 continue
             nuevo_modo = partes[1].upper()
             if nuevo_modo in ["MANUAL", "AUTO", "PRUEBAS"]:
                 modo_operacion = nuevo_modo
-                registrar_evento(f"[🔄 SISTEMA] Modo de operación cambiado a: {modo_operacion}")
+                registrar_evento(f"[SISTEMA] Modo de operación cambiado a: {modo_operacion}")
             else:
-                registrar_evento("[⚠️ ERROR] Modo no válido. Opciones: manual, auto, pruebas")
+                registrar_evento("[ERROR] Modo no válido. Opciones: manual, auto, pruebas")
 
+        # Comando para encender actuadores manualmente
         elif comando == "encender":
+            # Bloqueo por seguridad si el interlock esta activo
             if interlock_activo:
-                registrar_evento("[⚠️ DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
+                registrar_evento("[DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
                 continue
+            # Bloqueo por control automatico en curso
             if modo_operacion == "AUTO":
-                registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
+                registrar_evento("[DENEGADO] Control manual bloqueado durante Modo Automático.")
                 continue
             if len(partes) < 2:
-                registrar_evento("[⚠️ ERROR] Especifica el actuador. Uso: encender <bomba/valvula>")
+                registrar_evento("[ERROR] Especifica el actuador. Uso: encender <bomba/valvula>")
                 continue
             target = partes[1].lower()
             if target in actuadores:
                 actuadores[target].encender()
             else:
-                registrar_evento(f"[⚠️ ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
+                registrar_evento(f"[ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
 
+        # Comando para apagar actuadores manualmente
         elif comando == "apagar":
+            # Bloqueo por seguridad si el interlock esta activo
             if interlock_activo:
-                registrar_evento("[⚠️ DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
+                registrar_evento("[DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
                 continue
+            # Bloqueo por control automatico en curso
             if modo_operacion == "AUTO":
-                registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
+                registrar_evento("[DENEGADO] Control manual bloqueado durante Modo Automático.")
                 continue
             if len(partes) < 2:
-                registrar_evento("[⚠️ ERROR] Especifica el actuador. Uso: apagar <bomba/valvula>")
+                registrar_evento("[ERROR] Especifica el actuador. Uso: apagar <bomba/valvula>")
                 continue
             target = partes[1].lower()
             if target in actuadores:
                 actuadores[target].apagar()
             else:
-                registrar_evento(f"[⚠️ ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
+                registrar_evento(f"[ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
 
+        # Comando para modular o asignar valor a un actuador
         elif comando == "ajustar":
+            # Bloqueo por seguridad si el interlock esta activo
             if interlock_activo:
-                registrar_evento("[⚠️ DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
+                registrar_evento("[DENEGADO] Interlock de seguridad activo. Control manual bloqueado.")
                 continue
+            # Bloqueo por control automatico en curso
             if modo_operacion == "AUTO":
-                registrar_evento("[⚠️ DENEGADO] Control manual bloqueado durante Modo Automático.")
+                registrar_evento("[DENEGADO] Control manual bloqueado durante Modo Automático.")
                 continue
             if len(partes) < 3:
-                registrar_evento("[⚠️ ERROR] Faltan parámetros. Uso: ajustar <bomba/valvula> <valor>")
+                registrar_evento("[ERROR] Faltan parámetros. Uso: ajustar <bomba/valvula> <valor>")
                 continue
             target = partes[1].lower()
+            # Conversion y envio del valor numerico al actuador
             try:
                 valor = float(partes[2])
                 if target in actuadores:
                     actuadores[target].ajustar(valor)
                 else:
-                    registrar_evento(f"[⚠️ ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
+                    registrar_evento(f"[ERROR] Actuador '{target}' no existe. Opciones: bomba, valvula")
             except ValueError:
-                registrar_evento("[⚠️ ERROR] El valor de ajuste debe ser numérico.")
+                registrar_evento("[ERROR] El valor de ajuste debe ser numérico.")
 
+        # Comando para forzar la lectura de un sensor especifico
         elif comando == "leer":
             if len(partes) < 2:
-                registrar_evento("[⚠️ ERROR] Especifica el sensor. Uso: leer <termometro/presion>")
+                registrar_evento("[ERROR] Especifica el sensor. Uso: leer <termometro/presion>")
                 continue
             target = partes[1].lower()
             if target in sensores:
                 sensores[target].leer_valor_actual()
             else:
-                registrar_evento(f"[⚠️ ERROR] Sensor '{target}' no existe. Opciones: termometro, presion")
+                registrar_evento(f"[ERROR] Sensor '{target}' no existe. Opciones: termometro, presion")
 
+        # Manejo de entradas no reconocidas
         else:
-            registrar_evento(f"[⚠️ ERROR] Comando '{comando}' no reconocido.")
+            registrar_evento(f"[ERROR] Comando '{comando}' no reconocido.")
 
 
+# Punto de entrada para ejecucion directa del script
 if __name__ == "__main__":
     main()
+
+            
