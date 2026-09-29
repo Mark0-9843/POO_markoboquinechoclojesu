@@ -44,3 +44,24 @@ A continuación se presenta la arquitectura de software del sistema, modelada me
  | + ajustar(valor: float):void|       | + ajustar(valor: float):void|
  | + info(): str               |       | + info(): str               |
  +-----------------------------+       +-----------------------------+
+```
+Lógica de los Modos de Operación
+El comportamiento del sistema se rige bajo tres modos fundamentales:
+
+Modo Manual: Interacción directa por consola (HMI estático). El operario define los comandos de estado de los actuadores (ej. encender, apagar, ajustar).
+
+Modo Automático: Implementación del algoritmo de estabilidad dinámico del reactor basado en la siguiente fórmula:
+
+ΔT = (+1.5°C) - (0.05°C × % OperaciónBomba)
+
+Modo de Pruebas: Rutina de inyección de fallos destinada a la validación de los límites operativos del sistema.
+
+[!WARNING]
+Interlocks de Seguridad (Prioridad de Ejecución):
+Si en cualquier momento la Temperatura > 85.0 °C o la Presión > 12.0 Bar, el sistema ignorará inmediatamente cualquier instrucción del operario y forzará de manera simultánea:
+
+La Bomba de Enfriamiento al 100%.
+
+La Apertura Total de la Válvula de Alivio.
+
+Nota: Dentro de la consola, puedes usar comandos como encender, apagar o ajustar seguido del nombre del equipo, y escribir terminar para salir de manera segura.
