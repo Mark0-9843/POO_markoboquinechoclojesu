@@ -64,23 +64,23 @@ El comportamiento del sistema se rige bajo tres modos fundamentales:
 
 ## Versión 2.0.0: Portafolio Físico en Hardware (ESP32 en C++)
 
-Esta versión corresponde a la implementación de un Micro-Invernadero Inteligente mediante control por microcontrolador[cite: 4]. El código está desarrollado en C++ para la plataforma ESP32 y se encarga de la gestión automatizada de variables físicas junto con una interfaz de comandos por consola.
+Esta versión corresponde a la implementación de un Micro-Invernadero Inteligente mediante control por microcontrolador. El código está desarrollado en C++ para la plataforma ESP32 y se encarga de la gestión automatizada de variables físicas junto con una interfaz de comandos por consola.
 
 ### Configuración de Pines
 
 La asignación de periféricos al microcontrolador se define de la siguiente manera, basándose en la implementación del código y las especificaciones técnicas requeridas:
 
 *   **Sensor Térmico (DHT11):** GPIO 4 *(Nota: Modificado en código respecto a la especificación original para adecuarse al hardware físico)*.
-*   **Sensor LDR:** GPIO 32 para lectura de luz ambiental mediante ADC[cite: 4].
-*   **Ventilador (Motor DC):** GPIO 18 configurado como salida PWM a una frecuencia de 5kHz[cite: 4]. Adicionalmente, el código implementa el control de un Puente H a través de los pines GPIO 21 (AIN1), 22 (AIN2) y 23 (STBY).
-*   **LED de Potencia:** GPIO 19 configurado como salida PWM[cite: 4].
+*   **Sensor LDR:** GPIO 32 para lectura de luz ambiental mediante ADC.
+*   **Ventilador (Motor DC):** GPIO 18 configurado como salida PWM a una frecuencia de 5kHz. Adicionalmente, el código implementa el control de un Puente H a través de los pines GPIO 21 (AIN1), 22 (AIN2) y 23 (STBY).
+*   **LED de Potencia:** GPIO 19 configurado como salida PWM.
 
 ### Algoritmo de Control Físico
 
 El sistema opera mediante un bucle principal (Loop) que ejecuta la lógica de estabilización cuando se encuentra en `Modo Automático`:
 
-*   **Gestión Térmica:** Activación del ventilador si la temperatura excede los 30 °C[cite: 4]. En el código, esto se traduce en una señal PWM con valor de 128 (aprox. 50% del *Duty Cycle* a 8 bits).
-*   **Gestión Lumínica:** El sistema compensa la falta de luz natural[cite: 4]. Utilizando la función `map()`, a menor valor registrado en el LDR, mayor es el *Duty Cycle* del LED de potencia, logrando un control proporcional[cite: 4].
+*   **Gestión Térmica:** Activación del ventilador si la temperatura excede los 30 °C. En el código, esto se traduce en una señal PWM con valor de 128 (aprox. 50% del *Duty Cycle* a 8 bits).
+*   **Gestión Lumínica:** El sistema compensa la falta de luz natural. Utilizando la función `map()`, a menor valor registrado en el LDR, mayor es el *Duty Cycle* del LED de potencia, logrando un control proporcional.
 *   **Implementación PWM:** Se utilizan las funciones actualizadas de la API de ESP32 v3.0 (`ledcAttach` y `ledcWrite`) a 8 bits de resolución y 5kHz de frecuencia.
 
 ### Comunicación Serial y Telemetría
