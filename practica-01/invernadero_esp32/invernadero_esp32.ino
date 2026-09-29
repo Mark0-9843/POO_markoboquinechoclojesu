@@ -1,174 +1,197 @@
-#include <Arduino.h>
+#include "DHT.h"
 
-/* ============================================================
- *  Sistema de control físico ESP32
- *  - Gestión térmica: ventilador a PWM 100 % si T > 30 °C
- *  - Gestión lumínica: LED con control proporcional inverso al LDR
- *  - PWM con periférico LEDC (ledcSetup / ledcAttachPin / ledcWrite)
- *  Compatible con Arduino-ESP32 core 2.x
- * ============================================================ */
+// ==========================================
+// DEFINICIÓN DE PINES
+// ==========================================
+const int LDR_PIN = 32;   
+const int DHT_PIN = 4;    
+const int LED_PIN = 19;   
 
-// ---------- Asignación estricta de pines ----------
-constexpr uint8_t PIN_TEMP = 34;  // ADC  - LM35 (12 bits)
-constexpr uint8_t PIN_LDR  = 32;  // ADC  - Fotorresistencia
-constexpr uint8_t PIN_FAN  = 18;  // PWM  - Ventilador (motor DC)
-constexpr uint8_t PIN_LED  = 19;  // PWM  - LED de potencia
+const int PWMA_PIN = 18; 
+const int AIN1_PIN = 21; 
+const int AIN2_PIN = 22; 
+const int STBY_PIN = 23; 
 
-// ---------- Configuración PWM (LEDC) ----------
-constexpr uint32_t PWM_FREQ = 5000;                 // 5 kHz
-constexpr uint8_t  PWM_RES  = 8;                    // 8 bits -> 0..255
-constexpr uint8_t  PWM_MAX  = (1 << PWM_RES) - 1;   // 255 = 100 %
-constexpr uint8_t  CH_FAN   = 0;
-constexpr uint8_t  CH_LED   = 1;
+// ==========================================
+// CONFIGURACIÓN PWM (API ESP32 v3.0)
+// ==========================================
+const int frecuencia = 5000;   
+const int resolucion = 8;      
 
-// ---------- Parámetros de control ----------
-constexpr float    TEMP_UMBRAL = 30.0f;  // °C: enciende el ventilador
-constexpr float    TEMP_HISTER = 1.0f;   // °C: apaga a (umbral - histéresis)
-constexpr uint8_t  ADC_MUESTRAS = 16;    // Promediado para reducir ruido
-constexpr uint32_t CONTROL_MS   = 100;   // Periodo del lazo de control
-constexpr uint32_t TELEMETRIA_MS = 2000; // Periodo de telemetría periódica
+#define DHTTYPE DHT11     
+DHT dht(DHT_PIN, DHTTYPE);
 
-// ---------- Estado del sistema ----------
-struct Estado {
-  float   temperaturaC = 0.0f;
-  int     ldrRaw       = 0;
-  uint8_t ledPwm       = 0;
-  uint8_t fanPwm       = 0;
-} estado;
+// ==========================================
+// VARIABLES GLOBALES DE ESTADO (Telemetría)
+// ==========================================
+int valorLDR = 0;
+int brilloLED = 0;
+int velocidadMotor = 0;
+float temperatura = 0.0;
+float humedad = 0.0;
 
-uint32_t ultimoControl    = 0;
-uint32_t ultimaTelemetria = 0;
+// Variables de configuración del sistema
+bool modoAutomatico = true; // true = sensores mandan, false = comandos manuales mandan
+bool formatoJSON = false;   // true = salida JSON, false = salida en texto
 
-// ---------- Prototipos ----------
-uint32_t leerPromedioRaw(uint8_t pin);
-uint32_t leerPromedioMv(uint8_t pin);
-void actualizarControl();
-void procesarSerial();
-void ejecutarComando(String &cmd);
-void enviarTelemetriaJSON();
+// Control de tiempo para la telemetría (cada 2 segundos)
+unsigned long tiempoAnteriorTelemetria = 0;
+const long intervaloTelemetria = 2000;
 
-// ============================================================
+// ==========================================
+// SETUP
+// ==========================================
 void setup() {
   Serial.begin(115200);
-  Serial.setTimeout(20);
+  Serial.setTimeout(10); // Evita retrasos al leer comandos por Serial
+  
+  // Configurar puente H
+  pinMode(AIN1_PIN, OUTPUT);
+  pinMode(AIN2_PIN, OUTPUT);
+  pinMode(STBY_PIN, OUTPUT);
+  
+  // Dirección constante y activación
+  digitalWrite(AIN1_PIN, HIGH);
+  digitalWrite(AIN2_PIN, LOW);
+  digitalWrite(STBY_PIN, HIGH);
 
-  // Entradas analógicas. El LM35 entrega 10 mV/°C (300 mV a 30 °C), por lo
-  // que se usa atenuación 0 dB (~0-950 mV) para ganar resolución y linealidad.
-  pinMode(PIN_TEMP, INPUT);
-  pinMode(PIN_LDR, INPUT);
-  analogSetPinAttenuation(PIN_TEMP, ADC_0db);
-  analogSetPinAttenuation(PIN_LDR, ADC_11db);   // LDR: rango completo ~3.3 V
-
-  // Canal PWM del ventilador
-  ledcSetup(CH_FAN, PWM_FREQ, PWM_RES);
-  ledcAttachPin(PIN_FAN, CH_FAN);
-
-  // Canal PWM del LED de potencia
-  ledcSetup(CH_LED, PWM_FREQ, PWM_RES);
-  ledcAttachPin(PIN_LED, CH_LED);
-
-  // Seguridad: actuadores apagados al arrancar
-  ledcWrite(CH_FAN, 0);
-  ledcWrite(CH_LED, 0);
-
-  actualizarControl();  // Primera lectura para que STATUS no devuelva ceros
+  // Configurar pines PWM
+  ledcAttach(LED_PIN, frecuencia, resolucion);
+  ledcAttach(PWMA_PIN, frecuencia, resolucion);
+  
+  dht.begin();
+  Serial.println("Sistema de Instrumentación Iniciado.");
+  Serial.println("Escriba 'FORMAT_JSON' para telemetria JSON o 'STATUS' para lectura instantanea.");
 }
 
-// ============================================================
+// ==========================================
+// LOOP PRINCIPAL (Arquitectura limpia)
+// ==========================================
 void loop() {
-  const uint32_t ahora = millis();
-
-  // 1. Lazo de control a periodo fijo (no bloqueante)
-  if (ahora - ultimoControl >= CONTROL_MS) {
-    ultimoControl = ahora;
-    actualizarControl();
+  procesarComandos();
+  leerSensores();
+  
+  if (modoAutomatico) {
+    ejecutarLogicaAutomatica();
   }
-
-  // 2. Comandos por consola serie (no bloqueante)
-  procesarSerial();
-
-  // 3. Telemetría periódica
-  if (ahora - ultimaTelemetria >= TELEMETRIA_MS) {
-    ultimaTelemetria = ahora;
-    enviarTelemetriaJSON();
+  
+  actualizarActuadores();
+  
+  // Emitir telemetría cada 2 segundos
+  if (millis() - tiempoAnteriorTelemetria >= intervaloTelemetria) {
+    tiempoAnteriorTelemetria = millis();
+    imprimirTelemetria();
   }
 }
 
-// ============================================================
-//  Lectura y control
-// ============================================================
+// ==========================================
+// FUNCIONES DEL SISTEMA
+// ==========================================
 
-// Promedio de N muestras crudas (0-4095)
-uint32_t leerPromedioRaw(uint8_t pin) {
-  uint32_t suma = 0;
-  for (uint8_t i = 0; i < ADC_MUESTRAS; i++) suma += analogRead(pin);
-  return suma / ADC_MUESTRAS;
-}
+void procesarComandos() {
+  if (Serial.available() > 0) {
+    String comando = Serial.readStringUntil('\n');
+    comando.trim(); // Limpiar espacios ocultos o saltos de línea (\r)
+    comando.toUpperCase(); // Hacerlo insensible a mayúsculas/minúsculas
 
-// Promedio de N muestras en mV (usa la calibración de fábrica del ESP32)
-uint32_t leerPromedioMv(uint8_t pin) {
-  uint32_t suma = 0;
-  for (uint8_t i = 0; i < ADC_MUESTRAS; i++) suma += analogReadMilliVolts(pin);
-  return suma / ADC_MUESTRAS;
-}
-
-void actualizarControl() {
-  // --- Sensores ---
-  estado.temperaturaC = leerPromedioMv(PIN_TEMP) / 10.0f;  // 10 mV por °C
-  estado.ldrRaw       = leerPromedioRaw(PIN_LDR);
-
-  // --- Gestión térmica: ON/OFF con histéresis ---
-  // Enciende por encima de 30 °C y apaga por debajo de 29 °C,
-  // evitando que el ventilador oscile alrededor del umbral.
-  if (estado.temperaturaC > TEMP_UMBRAL) {
-    estado.fanPwm = PWM_MAX;                                // 100 %
-  } else if (estado.temperaturaC < (TEMP_UMBRAL - TEMP_HISTER)) {
-    estado.fanPwm = 0;
-  }
-  ledcWrite(CH_FAN, estado.fanPwm);
-
-  // --- Gestión lumínica: control proporcional inverso ---
-  // 4095 >> 4 = 255, por lo que menos luz (LDR bajo) => más duty en el LED.
-  estado.ledPwm = PWM_MAX - (estado.ldrRaw >> 4);
-  ledcWrite(CH_LED, estado.ledPwm);
-}
-
-// ============================================================
-//  Consola serie
-// ============================================================
-
-void procesarSerial() {
-  static String buffer;
-  while (Serial.available() > 0) {
-    const char c = (char)Serial.read();
-    if (c == '\n' || c == '\r') {
-      if (buffer.length() > 0) {
-        ejecutarComando(buffer);
-        buffer = "";
-      }
-    } else if (buffer.length() < 32) {
-      buffer += c;
+    if (comando == "AUTO") {
+      modoAutomatico = true;
+    } 
+    else if (comando == "MOTOR_ON") {
+      modoAutomatico = false;
+      velocidadMotor = 128;
+    } 
+    else if (comando == "MOTOR_OFF") {
+      modoAutomatico = false;
+      velocidadMotor = 0;
+    } 
+    else if (comando == "LED_ON") {
+      modoAutomatico = false;
+      brilloLED = 255;
+    } 
+    else if (comando == "LED_OFF") {
+      modoAutomatico = false;
+      brilloLED = 0;
+    } 
+    else if (comando == "FORMAT_JSON") {
+      formatoJSON = true;
+    } 
+    else if (comando == "FORMAT_TEXT") {
+      formatoJSON = false;
+    } 
+    else if (comando == "STATUS") {
+      imprimirTelemetria(); // Imprime de inmediato
+    } 
+    else if (comando.length() > 0) {
+      Serial.println("[ERROR] Comando desconocido.");
     }
   }
 }
 
-void ejecutarComando(String &cmd) {
-  cmd.trim();
-  if (cmd.equalsIgnoreCase("STATUS")) {
-    enviarTelemetriaJSON();
-  } else if (cmd.equalsIgnoreCase("HELP")) {
-    Serial.println(F("Comandos disponibles: STATUS (telemetria en JSON), HELP"));
-  } else {
-    Serial.println(F("Comando desconocido. Escribe HELP"));
+void leerSensores() {
+  // LDR en tiempo real
+  valorLDR = analogRead(LDR_PIN);
+  
+  // El DHT11 no debe leerse muy rápido, usamos el mismo temporizador de telemetría
+  // para actualizar sus variables justo antes de imprimir
+  if (millis() - tiempoAnteriorTelemetria >= (intervaloTelemetria - 10)) {
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    // Solo actualizamos si la lectura es válida
+    if (!isnan(h) && !isnan(t)) {
+      humedad = h;
+      temperatura = t;
+    } else {
+      temperatura = -999.0; // Código de error
+      humedad = -999.0;
+    }
   }
 }
 
-// ============================================================
-//  Telemetría
-// ============================================================
+void ejecutarLogicaAutomatica() {
+  // Lógica del LED
+  brilloLED = map(valorLDR, 1000, 4095, 255, 0);
+  brilloLED = constrain(brilloLED, 0, 255); 
+  
+  // Lógica del Motor / Ventilador
+  if (temperatura > 30.0 && temperatura != -999.0) {
+    velocidadMotor = 128; 
+  } else {
+    velocidadMotor = 0;   
+  }
+}
 
-void enviarTelemetriaJSON() {
-  Serial.printf(
-    "{\"temperatura_C\":%.2f,\"ldr_raw\":%d,\"led_pwm\":%u,\"fan_pwm\":%u}\n",
-    estado.temperaturaC, estado.ldrRaw, estado.ledPwm, estado.fanPwm);
+void actualizarActuadores() {
+  ledcWrite(LED_PIN, brilloLED);
+  ledcWrite(PWMA_PIN, velocidadMotor);
+}
+
+void imprimirTelemetria() {
+  if (formatoJSON) {
+    // Estructura JSON perfecta para integrarse con Python, C# o Web
+    Serial.print("{\"modo\":\"");
+    Serial.print(modoAutomatico ? "AUTO" : "MANUAL");
+    Serial.print("\",\"temp\":");
+    Serial.print(temperatura);
+    Serial.print(",\"hum\":");
+    Serial.print(humedad);
+    Serial.print(",\"ldr\":");
+    Serial.print(valorLDR);
+    Serial.print(",\"pwm_led\":");
+    Serial.print(brilloLED);
+    Serial.print(",\"pwm_motor\":");
+    Serial.print(velocidadMotor);
+    Serial.println("}");
+  } else {
+    // Estructura de Texto Plano para diagnóstico visual
+    Serial.print("[");
+    Serial.print(modoAutomatico ? "AUTO" : "MANUAL");
+    Serial.print("] Temp: ");
+    if (temperatura == -999.0) Serial.print("ERR"); else { Serial.print(temperatura); Serial.print("C"); }
+    Serial.print(" | Hum: ");
+    if (humedad == -999.0) Serial.print("ERR"); else { Serial.print(humedad); Serial.print("%"); }
+    Serial.print(" | LDR: "); Serial.print(valorLDR);
+    Serial.print(" | LED: "); Serial.print(brilloLED);
+    Serial.print(" | Motor: "); Serial.println(velocidadMotor);
+  }
 }
