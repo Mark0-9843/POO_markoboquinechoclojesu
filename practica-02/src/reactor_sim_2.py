@@ -3,13 +3,11 @@ import random
 
 historial_eventos = []
 
-
 def registrar_evento(mensaje):
     """Guarda un evento y conserva solo los últimos 5."""
     historial_eventos.append(mensaje)
     if len(historial_eventos) > 5:
         historial_eventos.pop(0)
-
 
 class NodoIoT:
     def __init__(self, id_dispositivo, ip, ubicacion):
@@ -26,7 +24,6 @@ class NodoIoT:
         enlace = "ONLINE" if self.conectado else "OFFLINE"
         return f"{self.id_dispositivo:<8} | {self.ip:<13} | {enlace:<7}"
 
-
 class NodoSensor(NodoIoT):
     def __init__(self, id_dispositivo, ip, ubicacion, nombre, unidad, rango_min, rango_max, limite_alerta):
         super().__init__(id_dispositivo, ip, ubicacion)
@@ -38,17 +35,17 @@ class NodoSensor(NodoIoT):
         self.__limite_alerta = None
         self.limite_alerta = limite_alerta
 
-    @property  # convierte el método en atributo de lectura: sensor.limite_alerta
+    @property
     def limite_alerta(self):
-        return self.__limite_alerta # devuelve el atributo privado
+        return self.__limite_alerta
 
-    @limite_alerta.setter    # setter: se ejecuta al asignar con =
+    @limite_alerta.setter
     def limite_alerta(self, valor):
         if isinstance(valor, bool) or not isinstance(valor, (int, float)):
             raise TypeError("El límite debe ser numérico.")
         if not (self.rango_min <= valor <= self.rango_max):
             raise ValueError(f"Límite fuera de rango [{self.rango_min} - {self.rango_max}].")
-        self.__limite_alerta = float(valor)    # si todo es válido, guarda el dato como float en el privado
+        self.__limite_alerta = float(valor)
 
     def leer(self):
         self.valor_actual = round(random.uniform(self.rango_min, self.rango_max), 2)
@@ -58,7 +55,6 @@ class NodoSensor(NodoIoT):
         alerta = " ⚠ ALERTA" if self.valor_actual > self.__limite_alerta else ""
         return (f"{super().enviar_telemetria()} | SENSOR   {self.nombre:<10} | "
                 f"Lectura: {self.valor_actual:>7} {self.unidad}{alerta}")
-
 
 class NodoActuador(NodoIoT):
     def __init__(self, id_dispositivo, ip, ubicacion, nombre):
@@ -99,9 +95,8 @@ class NodoActuador(NodoIoT):
         return (f"{super().enviar_telemetria()} | ACTUADOR {self.nombre:<10} | "
                 f"Estado: {estado:<3} | PWM: {self.__potencia_pwm:>5.1f}%")
 
-
 class ActuadorDigital(NodoActuador):
-    """Actuador binario (0 o 1)"""
+    """Actuador binario (0 o 1), ej. una válvula todo/nada."""
 
     def encender(self):
         super().encender()
@@ -124,10 +119,8 @@ class ActuadorDigital(NodoActuador):
         return (f"{NodoIoT.enviar_telemetria(self)} | DIGITAL  {self.nombre:<10} | "
                 f"Estado: {estado:<3} | Valor: {int(self.potencia_pwm)}")
 
-
 def limpiar_pantalla():
     os.system('cls' if os.name == 'nt' else 'clear')
-
 
 def mostrar_hmi(red_iot, modo="MANUAL"):
     print("=" * 100)
@@ -144,6 +137,52 @@ def mostrar_hmi(red_iot, modo="MANUAL"):
         print(f"   {evento}")
     print("=" * 100)
 
+def mostrar_comandos():
+    print(" COMANDOS DISPONIBLES (MODO MANUAL):")
+    print("   • encender <actuador>        (Ej: encender bomba)")
+    print("   • apagar <actuador>          (Ej: apagar valvula)")
+    print("   • ajustar <actuador> <val>   (Ej: ajustar bomba 75.5  /  ajustar valvula 1)")
+    print("   • leer <sensor>              (Ej: leer termometro  /  leer presion)")
+    print("   • terminar                   (Finaliza la simulación)")
+    print("=" * 100)
+
+def procesar_comando(entrada, actuadores, sensores):
+    """Interpreta el comando del operario y lo ejecuta sobre el dispositivo."""
+    partes = entrada.split()
+    comando = partes[0].lower()
+
+    if comando in ("encender", "apagar", "ajustar", "leer"):
+        if len(partes) < 2:
+            registrar_evento(f"[ERROR] Falta el dispositivo. Uso: {comando} <nombre>")
+            return
+        nombre = partes[1].lower()
+
+        if comando == "leer":
+            if nombre in sensores:
+                sensores[nombre].leer()
+            else:
+                registrar_evento(f"[ERROR] Sensor '{nombre}' no existe. Opciones: {', '.join(sensores)}")
+            return
+
+        if nombre not in actuadores:
+            registrar_evento(f"[ERROR] Actuador '{nombre}' no existe. Opciones: {', '.join(actuadores)}")
+            return
+        actuador = actuadores[nombre]
+
+        if comando == "encender":
+            actuador.encender()
+        elif comando == "apagar":
+            actuador.apagar()
+        else:  # ajustar
+            if len(partes) < 3:
+                registrar_evento("[ERROR] Falta el valor. Uso: ajustar <actuador> <valor>")
+                return
+            try:
+                actuador.ajustar(float(partes[2]))
+            except ValueError:
+                registrar_evento("[ERROR] El valor de ajuste debe ser numérico.")
+    else:
+        registrar_evento(f"[ERROR] Comando '{comando}' no reconocido.")
 
 def main():
     termometro = NodoSensor("SEN-001", "192.168.1.21", "Reactor", "Termometro", "°C", 0, 150, 85)
@@ -153,28 +192,31 @@ def main():
 
     red_iot = [termometro, bomba, presion, valvula]
 
+    # Diccionarios para buscar por nombre lo que escribe el operario
+    actuadores = {"bomba": bomba, "valvula": valvula}
+    sensores = {"termometro": termometro, "presion": presion}
+
     for dispositivo in red_iot:
         dispositivo.conectar()
 
-    bomba.ajustar(75.5)
-    valvula.ajustar(1)
-
-    # Bucle principal
+    # Bucle principal: refresca la pantalla y atiende los comandos del operario
     while True:
-        termometro.leer()
-        presion.leer()
-
         limpiar_pantalla()
         mostrar_hmi(red_iot)
+        mostrar_comandos()
 
         try:
-            entrada = input("Enter para actualizar | 'terminar' para salir >> ").strip().lower()
+            entrada = input("Ingrese comando >> ").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
-        if entrada == "terminar":
+        if not entrada:
+            continue
+        if entrada.lower() == "terminar":
             print("\n[+] Simulación finalizada.")
             break
+
+        procesar_comando(entrada, actuadores, sensores)
 
 if __name__ == "__main__":
     main()
