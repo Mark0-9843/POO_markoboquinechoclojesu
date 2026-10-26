@@ -25,13 +25,15 @@ class NodoIoT:
         return f"{self.id_dispositivo:<8} | {self.ip:<13} | {enlace:<7}"
 
 class NodoSensor(NodoIoT):
-    def __init__(self, id_dispositivo, ip, ubicacion, nombre, unidad, rango_min, rango_max, limite_alerta):
+    def __init__(self, id_dispositivo, ip, ubicacion, nombre, unidad, rango_min, rango_max,
+                 limite_alerta, simulacion_aleatoria=True):
         super().__init__(id_dispositivo, ip, ubicacion)
         self.nombre = nombre
         self.unidad = unidad
         self.rango_min = rango_min
         self.rango_max = rango_max
         self.valor_actual = 0.0
+        self.simulacion_aleatoria = simulacion_aleatoria  # False: el valor lo mueve el modo AUTO
         self.__limite_alerta = None
         self.limite_alerta = limite_alerta
 
@@ -48,13 +50,15 @@ class NodoSensor(NodoIoT):
         self.__limite_alerta = float(valor)
 
     def leer(self):
-        self.valor_actual = round(random.uniform(self.rango_min, self.rango_max), 2)
+        if self.simulacion_aleatoria:
+            self.valor_actual = round(random.uniform(self.rango_min, self.rango_max), 2)
         registrar_evento(f"[LECTURA] {self.nombre}: {self.valor_actual} {self.unidad}")
 
     def enviar_telemetria(self):
         alerta = " ⚠ ALERTA" if self.valor_actual > self.__limite_alerta else ""
         return (f"{super().enviar_telemetria()} | SENSOR   {self.nombre:<10} | "
                 f"Lectura: {self.valor_actual:>7} {self.unidad}{alerta}")
+
 
 class NodoActuador(NodoIoT):
     def __init__(self, id_dispositivo, ip, ubicacion, nombre):
@@ -95,6 +99,7 @@ class NodoActuador(NodoIoT):
         return (f"{super().enviar_telemetria()} | ACTUADOR {self.nombre:<10} | "
                 f"Estado: {estado:<3} | PWM: {self.__potencia_pwm:>5.1f}%")
 
+
 class ActuadorDigital(NodoActuador):
     """Actuador binario (0 o 1), ej. una válvula todo/nada."""
 
@@ -119,8 +124,10 @@ class ActuadorDigital(NodoActuador):
         return (f"{NodoIoT.enviar_telemetria(self)} | DIGITAL  {self.nombre:<10} | "
                 f"Estado: {estado:<3} | Valor: {int(self.potencia_pwm)}")
 
+
 def limpiar_pantalla():
     os.system('cls' if os.name == 'nt' else 'clear')
+
 
 def mostrar_hmi(red_iot, modo="MANUAL"):
     print("=" * 100)
@@ -137,14 +144,37 @@ def mostrar_hmi(red_iot, modo="MANUAL"):
         print(f"   {evento}")
     print("=" * 100)
 
-def mostrar_comandos():
-    print(" COMANDOS DISPONIBLES (MODO MANUAL):")
+
+def ejecutar_modo_automatico(actuadores, sensores, consigna_temp=50.0):
+    """
+    Control proporcional de la bomba para estabilizar la temperatura:
+    ΔT = (+1.5°C) - (0.05°C × % de potencia de la bomba)
+    """
+    bomba = actuadores["bomba"]
+    termometro = sensores["termometro"]
+
+    error = termometro.valor_actual - consigna_temp
+    nuevo_pwm = max(0.0, min(100.0, 30.0 + error * 2.0))  # limitado a 0-100 %
+    bomba.ajustar(nuevo_pwm)
+
+    delta_t = 1.5 - 0.05 * bomba.potencia_pwm
+    termometro.valor_actual = round(termometro.valor_actual + delta_t, 2)
+
+    registrar_evento(f"[AUTO] Bomba {bomba.potencia_pwm:.1f}% | ΔT: {delta_t:+.2f}°C | Temp: {termometro.valor_actual:.2f}°C")
+
+
+def mostrar_comandos(modo):
+    print(" COMANDOS DISPONIBLES:")
+    print("   • modo <manual/auto>         (Cambia el modo de operación)")
     print("   • encender <actuador>        (Ej: encender bomba)")
     print("   • apagar <actuador>          (Ej: apagar valvula)")
     print("   • ajustar <actuador> <val>   (Ej: ajustar bomba 75.5  /  ajustar valvula 1)")
     print("   • leer <sensor>              (Ej: leer termometro  /  leer presion)")
     print("   • terminar                   (Finaliza la simulación)")
+    if modo == "AUTO":
+        print("   ⚠ Modo AUTO: control manual bloqueado. Enter avanza un ciclo.")
     print("=" * 100)
+
 
 def procesar_comando(entrada, actuadores, sensores):
     """Interpreta el comando del operario y lo ejecuta sobre el dispositivo."""
@@ -184,8 +214,10 @@ def procesar_comando(entrada, actuadores, sensores):
     else:
         registrar_evento(f"[ERROR] Comando '{comando}' no reconocido.")
 
+
 def main():
-    termometro = NodoSensor("SEN-001", "192.168.1.21", "Reactor", "Termometro", "°C", 0, 150, 85)
+    termometro = NodoSensor("SEN-001", "192.168.1.21", "Reactor", "Termometro", "°C", 0, 150, 85,
+                            simulacion_aleatoria=False)
     presion = NodoSensor("SEN-002", "192.168.1.22", "Reactor", "Presion", "Bar", 0, 15, 12)
     bomba = NodoActuador("ACT-001", "192.168.1.11", "Enfriamiento", "Bomba")
     valvula = ActuadorDigital("ACT-002", "192.168.1.12", "Alivio", "Valvula")
@@ -199,11 +231,16 @@ def main():
     for dispositivo in red_iot:
         dispositivo.conectar()
 
-    # Bucle principal: refresca la pantalla y atiende los comandos del operario
+    modo_operacion = "MANUAL"
+
+    # Bucle principal: ejecuta el modo, refresca la pantalla y atiende comandos
     while True:
+        if modo_operacion == "AUTO":
+            ejecutar_modo_automatico(actuadores, sensores)
+
         limpiar_pantalla()
-        mostrar_hmi(red_iot)
-        mostrar_comandos()
+        mostrar_hmi(red_iot, modo_operacion)
+        mostrar_comandos(modo_operacion)
 
         try:
             entrada = input("Ingrese comando >> ").strip()
@@ -211,12 +248,22 @@ def main():
             break
 
         if not entrada:
-            continue
+            continue  # en AUTO, Enter avanza un ciclo
         if entrada.lower() == "terminar":
             print("\n[+] Simulación finalizada.")
             break
 
-        procesar_comando(entrada, actuadores, sensores)
+        partes = entrada.split()
+        if partes[0].lower() == "modo":
+            if len(partes) > 1 and partes[1].upper() in ("MANUAL", "AUTO"):
+                modo_operacion = partes[1].upper()
+                registrar_evento(f"[SISTEMA] Modo de operación cambiado a: {modo_operacion}")
+            else:
+                registrar_evento("[ERROR] Uso: modo <manual/auto>")
+        elif modo_operacion == "AUTO":
+            registrar_evento("[DENEGADO] Control manual bloqueado durante el modo AUTO.")
+        else:
+            procesar_comando(entrada, actuadores, sensores)
 
 if __name__ == "__main__":
     main()
