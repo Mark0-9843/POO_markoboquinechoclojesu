@@ -32,6 +32,7 @@ classDiagram
         +rango_min: float
         +rango_max: float
         +valor_actual: float
+        +simulacion_aleatoria: bool
         -__limite_alerta: float
         +limite_alerta (property)
         +leer()
@@ -41,6 +42,9 @@ classDiagram
         +nombre: str
         -__estado_activo: bool
         -__potencia_pwm: float
+        +estado_activo (property, solo lectura)
+        +potencia_pwm (property, solo lectura)
+        #_asignar_potencia(valor)
         +encender()
         +apagar()
         +ajustar(valor)
@@ -64,14 +68,14 @@ classDiagram
 | Clase | Hereda de | Responsabilidad |
 | :--- | :--- | :--- |
 | `NodoIoT` | — | Datos de red del dispositivo (`id_dispositivo`, `ip`, `ubicacion`), `conectar()` y la telemetría base (`ONLINE` / `OFFLINE`). |
-| `NodoSensor` | `NodoIoT` | Sensor con rango de medición, valor actual y límite de alerta validado. `leer()` simula una lectura aleatoria dentro del rango. |
-| `NodoActuador` | `NodoIoT` | Actuador proporcional: potencia PWM de 0 a 100 %, con `encender()`, `apagar()` y `ajustar(valor)`. |
+| `NodoSensor` | `NodoIoT` | Sensor con rango de medición, valor actual y límite de alerta validado. `leer()` simula una lectura aleatoria dentro del rango solo si `simulacion_aleatoria` es `True`; si es `False`, conserva el valor que le asigna el modo AUTO. |
+| `NodoActuador` | `NodoIoT` | Actuador proporcional: potencia PWM de 0 a 100 %, con `encender()`, `apagar()` y `ajustar(valor)`. Su estado y potencia se leen mediante propiedades de solo lectura. |
 | `ActuadorDigital` | `NodoActuador` | Actuador de dos estados (0 o 1), por ejemplo una válvula todo/nada. Rechaza cualquier valor distinto de 0 o 1. |
 
 ## Conceptos de POO aplicados
 
 - **Herencia:** `NodoSensor` y `NodoActuador` reutilizan los atributos y métodos de `NodoIoT` mediante `super()`. `ActuadorDigital` especializa a `NodoActuador`.
-- **Encapsulamiento:** `__limite_alerta`, `__estado_activo` y `__potencia_pwm` son atributos privados. El límite de alerta se maneja con `@property` y su *setter*, que lanza `TypeError` si el valor no es numérico y `ValueError` si queda fuera de `[rango_min, rango_max]`.
+- **Encapsulamiento:** `__limite_alerta`, `__estado_activo` y `__potencia_pwm` son atributos privados. El límite de alerta se maneja con `@property` y su *setter*, que lanza `TypeError` si el valor no es numérico y `ValueError` si queda fuera de `[rango_min, rango_max]`. El estado y la potencia del actuador solo se leen con `@property` (sin *setter*): únicamente cambian mediante `encender()`, `apagar()` y `ajustar()`. `ActuadorDigital` modifica la potencia privada a través del método protegido `_asignar_potencia()`.
 - **Polimorfismo:** `enviar_telemetria()` está sobrescrito en cada clase. El bucle que dibuja el HMI recorre la lista `red_iot` y llama al mismo método en todos los nodos, sin `if/else` por tipo de dispositivo.
 
 ## Dispositivos simulados
@@ -95,7 +99,7 @@ Cuando la lectura de un sensor supera su límite de alerta, la telemetría muest
 
    Con la bomba al 30 % el cambio de temperatura es cero, así que el sistema se estabiliza en 50 °C. En este modo el control manual queda bloqueado y se avanza un ciclo presionando **Enter**.
 
-El termómetro no genera lecturas aleatorias: su valor lo mueve el modo AUTO y arranca en 0 °C. La presión sí toma un valor aleatorio dentro de su rango cada vez que se lee.
+El termómetro no genera lecturas aleatorias (`simulacion_aleatoria=False`): su valor lo mueve el modo AUTO y arranca en 0 °C. La presión sí toma un valor aleatorio dentro de su rango cada vez que se lee.
 
 El panel también muestra un **registro de eventos** con las últimas 5 acciones del sistema.
 
