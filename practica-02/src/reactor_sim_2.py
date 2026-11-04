@@ -3,11 +3,13 @@ import random
 
 historial_eventos = []
 
+
 def registrar_evento(mensaje):
     """Guarda un evento y conserva solo los últimos 5."""
     historial_eventos.append(mensaje)
     if len(historial_eventos) > 5:
         historial_eventos.pop(0)
+
 
 class NodoIoT:
     def __init__(self, id_dispositivo, ip, ubicacion):
@@ -23,6 +25,7 @@ class NodoIoT:
     def enviar_telemetria(self):
         enlace = "ONLINE" if self.conectado else "OFFLINE"
         return f"{self.id_dispositivo:<8} | {self.ip:<13} | {enlace:<7}"
+
 
 class NodoSensor(NodoIoT):
     def __init__(self, id_dispositivo, ip, ubicacion, nombre, unidad, rango_min, rango_max,
@@ -51,11 +54,15 @@ class NodoSensor(NodoIoT):
 
     def leer(self):
         if self.simulacion_aleatoria:
-            self.valor_actual = round(random.uniform(self.rango_min, self.rango_max), 2)
+            self.valor_actual = round(random.uniform(self.rango_min, self.rango_max * 0.5), 2)
         registrar_evento(f"[LECTURA] {self.nombre}: {self.valor_actual} {self.unidad}")
 
+    def excede_limite(self):
+        """True si la lectura actual supera el límite de alerta."""
+        return self.valor_actual > self.__limite_alerta
+
     def enviar_telemetria(self):
-        alerta = " ⚠ ALERTA" if self.valor_actual > self.__limite_alerta else ""
+        alerta = " ⚠ ALERTA" if self.excede_limite() else ""
         return (f"{super().enviar_telemetria()} | SENSOR   {self.nombre:<10} | "
                 f"Lectura: {self.valor_actual:>7} {self.unidad}{alerta}")
 
@@ -129,9 +136,11 @@ def limpiar_pantalla():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
-def mostrar_hmi(red_iot, modo="MANUAL"):
+def mostrar_hmi(red_iot, modo="MANUAL", interlock_activo=False):
     print("=" * 100)
     print(f"  PANEL DE CONTROL HMI - MODO: [{modo}]")
+    if interlock_activo:
+        print("  🚨 INTERLOCK DE SEGURIDAD ACTIVO - CONTROL DEL OPERARIO BLOQUEADO 🚨".center(100))
     print("=" * 100)
     print(" [TELEMETRÍA DE LA RED IoT]")
     for dispositivo in red_iot:  # polimorfismo
@@ -163,9 +172,59 @@ def ejecutar_modo_automatico(actuadores, sensores, consigna_temp=50.0):
     registrar_evento(f"[AUTO] Bomba {bomba.potencia_pwm:.1f}% | ΔT: {delta_t:+.2f}°C | Temp: {termometro.valor_actual:.2f}°C")
 
 
-def mostrar_comandos(modo):
+def ejecutar_modo_pruebas(actuadores, sensores):
+    """Inyecta un fallo aleatorio por ciclo para validar los límites y la seguridad del sistema."""
+    fallo = random.choice(["sobrecalentamiento", "sobrepresion", "falla_bomba", "falla_valvula", "sin_novedad"])
+
+    if fallo == "sobrecalentamiento":
+        temp = round(random.uniform(151.0, 180.0), 2)
+        sensores["termometro"].valor_actual = temp
+        registrar_evento(f"[PRUEBA] Sobrecalentamiento inyectado: {temp} °C")
+
+    elif fallo == "sobrepresion":
+        pres = round(random.uniform(15.5, 25.0), 2)
+        sensores["presion"].valor_actual = pres
+        registrar_evento(f"[PRUEBA] Sobrepresión inyectada: {pres} Bar")
+
+    elif fallo == "falla_bomba":
+        valor = round(random.uniform(105.0, 150.0), 1)
+        registrar_evento("[PRUEBA] Intentando modular la bomba fuera de rango...")
+        actuadores["bomba"].ajustar(valor)
+
+    elif fallo == "falla_valvula":
+        valor = random.choice([-1, 2, 5, 9])
+        registrar_evento("[PRUEBA] Enviando valor lógico inválido a la válvula...")
+        actuadores["valvula"].ajustar(valor)
+
+    else:
+        registrar_evento("[PRUEBA] Monitoreo estable. Sin anomalías en este ciclo.")
+
+
+def verificar_interlocks_seguridad(actuadores, sensores):
+    """
+    Se evalúa en cada ciclo, sin importar el modo. Si algún sensor supera su límite
+    de alerta (Temp > 85 °C o Presión > 12 Bar) fuerza Bomba al 100 % y Válvula abierta.
+    Devuelve True si el interlock está activo (el control del operario queda bloqueado).
+    """
+    if not any(sensor.excede_limite() for sensor in sensores.values()):
+        return False
+
+    bomba = actuadores["bomba"]
+    valvula = actuadores["valvula"]
+    if bomba.potencia_pwm != 100.0:
+        bomba.ajustar(100.0)
+    if valvula.potencia_pwm != 1:
+        valvula.encender()
+
+    temp = sensores["termometro"].valor_actual
+    pres = sensores["presion"].valor_actual
+    registrar_evento(f"[🚨 INTERLOCK] T={temp:.2f}°C, P={pres:.2f}Bar -> Bomba 100% / Válvula ABIERTA. Control bloqueado.")
+    return True
+
+
+def mostrar_comandos(modo, interlock_activo=False):
     print(" COMANDOS DISPONIBLES:")
-    print("   • modo <manual/auto>         (Cambia el modo de operación)")
+    print("   • modo <manual/auto/pruebas> (Cambia el modo de operación)")
     print("   • encender <actuador>        (Ej: encender bomba)")
     print("   • apagar <actuador>          (Ej: apagar valvula)")
     print("   • ajustar <actuador> <val>   (Ej: ajustar bomba 75.5  /  ajustar valvula 1)")
@@ -173,6 +232,10 @@ def mostrar_comandos(modo):
     print("   • terminar                   (Finaliza la simulación)")
     if modo == "AUTO":
         print("   ⚠ Modo AUTO: control manual bloqueado. Enter avanza un ciclo.")
+    elif modo == "PRUEBAS":
+        print("   ⚠ Modo PRUEBAS: cada Enter inyecta un fallo aleatorio.")
+    if interlock_activo:
+        print("   ⚠ Interlock activo: encender / apagar / ajustar desactivados.")
     print("=" * 100)
 
 
@@ -232,15 +295,21 @@ def main():
         dispositivo.conectar()
 
     modo_operacion = "MANUAL"
+    interlock_activo = False
 
-    # Bucle principal: ejecuta el modo, refresca la pantalla y atiende comandos
+    # Bucle principal: ejecuta el modo, aplica los interlocks, refresca la pantalla y atiende comandos
     while True:
         if modo_operacion == "AUTO":
             ejecutar_modo_automatico(actuadores, sensores)
+        elif modo_operacion == "PRUEBAS":
+            ejecutar_modo_pruebas(actuadores, sensores)
+
+        # Los interlocks se evalúan SIEMPRE, sin importar el modo
+        interlock_activo = verificar_interlocks_seguridad(actuadores, sensores)
 
         limpiar_pantalla()
-        mostrar_hmi(red_iot, modo_operacion)
-        mostrar_comandos(modo_operacion)
+        mostrar_hmi(red_iot, modo_operacion, interlock_activo)
+        mostrar_comandos(modo_operacion, interlock_activo)
 
         try:
             entrada = input("Ingrese comando >> ").strip()
@@ -248,22 +317,28 @@ def main():
             break
 
         if not entrada:
-            continue  # en AUTO, Enter avanza un ciclo
+            continue  # en AUTO y PRUEBAS, Enter avanza un ciclo
         if entrada.lower() == "terminar":
             print("\n[+] Simulación finalizada.")
             break
 
         partes = entrada.split()
-        if partes[0].lower() == "modo":
-            if len(partes) > 1 and partes[1].upper() in ("MANUAL", "AUTO"):
+        comando = partes[0].lower()
+
+        if comando == "modo":
+            if len(partes) > 1 and partes[1].upper() in ("MANUAL", "AUTO", "PRUEBAS"):
                 modo_operacion = partes[1].upper()
                 registrar_evento(f"[SISTEMA] Modo de operación cambiado a: {modo_operacion}")
             else:
-                registrar_evento("[ERROR] Uso: modo <manual/auto>")
+                registrar_evento("[ERROR] Uso: modo <manual/auto/pruebas>")
+        elif comando in ("encender", "apagar", "ajustar") and interlock_activo:
+            registrar_evento("[DENEGADO] Interlock de seguridad activo. Control del operario bloqueado.")
         elif modo_operacion == "AUTO":
             registrar_evento("[DENEGADO] Control manual bloqueado durante el modo AUTO.")
         else:
             procesar_comando(entrada, actuadores, sensores)
 
+
 if __name__ == "__main__":
     main()
+
