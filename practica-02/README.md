@@ -36,6 +36,7 @@ classDiagram
         -__limite_alerta: float
         +limite_alerta (property)
         +leer()
+        +excede_limite() bool
         +enviar_telemetria() str
     }
     class NodoActuador {
@@ -61,14 +62,14 @@ classDiagram
     NodoActuador <|-- ActuadorDigital
 ```
 
-> `ActuadorDigital` extiende a `NodoActuador` en el código; el PDF del UML muestra las tres clases principales (`NodoIoT`, `NodoSensor` y `NodoActuador`).
+> El PDF del UML muestra las cuatro clases (`NodoIoT`, `NodoSensor`, `NodoActuador` y `ActuadorDigital`), con la misma jerarquía del diagrama anterior.
 
 ## Clases
 
 | Clase | Hereda de | Responsabilidad |
 | :--- | :--- | :--- |
 | `NodoIoT` | — | Datos de red del dispositivo (`id_dispositivo`, `ip`, `ubicacion`), `conectar()` y la telemetría base (`ONLINE` / `OFFLINE`). |
-| `NodoSensor` | `NodoIoT` | Sensor con rango de medición, valor actual y límite de alerta validado. `leer()` simula una lectura aleatoria dentro del rango solo si `simulacion_aleatoria` es `True`; si es `False`, conserva el valor que le asigna el modo AUTO. |
+| `NodoSensor` | `NodoIoT` | Sensor con rango de medición, valor actual y límite de alerta validado. `leer()` simula una lectura aleatoria entre 0 y la mitad de su rango solo si `simulacion_aleatoria` es `True`; si es `False`, conserva el valor que le asigna el modo AUTO. `excede_limite()` indica si la lectura supera el límite de alerta. |
 | `NodoActuador` | `NodoIoT` | Actuador proporcional: potencia PWM de 0 a 100 %, con `encender()`, `apagar()` y `ajustar(valor)`. Su estado y potencia se leen mediante propiedades de solo lectura. |
 | `ActuadorDigital` | `NodoActuador` | Actuador de dos estados (0 o 1), por ejemplo una válvula todo/nada. Rechaza cualquier valor distinto de 0 o 1. |
 
@@ -98,8 +99,27 @@ Cuando la lectura de un sensor supera su límite de alerta, la telemetría muest
    - `ΔT = (+1.5 °C) − (0.05 °C × % de potencia de la bomba)`
 
    Con la bomba al 30 % el cambio de temperatura es cero, así que el sistema se estabiliza en 50 °C. En este modo el control manual queda bloqueado y se avanza un ciclo presionando **Enter**.
+3. **PRUEBAS:** en cada ciclo (**Enter**) el sistema inyecta un fallo aleatorio para validar los límites y la seguridad:
 
-El termómetro no genera lecturas aleatorias (`simulacion_aleatoria=False`): su valor lo mueve el modo AUTO y arranca en 0 °C. La presión sí toma un valor aleatorio dentro de su rango cada vez que se lee.
+   | Fallo inyectado | Efecto |
+   | :--- | :--- |
+   | Sobrecalentamiento | Temperatura entre 151 y 180 °C |
+   | Sobrepresión | Presión entre 15.5 y 25 Bar |
+   | Falla de bomba | Intento de ajustar la bomba entre 105 y 150 % (rechazado por la validación) |
+   | Falla de válvula | Valor lógico inválido (-1, 2, 5 o 9) enviado a la válvula (rechazado) |
+   | Sin novedad | Ciclo estable, sin anomalías |
+
+El termómetro no genera lecturas aleatorias (`simulacion_aleatoria=False`): su valor lo mueve el modo AUTO y arranca en 0 °C. La presión sí toma un valor aleatorio entre 0 y la mitad de su rango (0 – 7.5 Bar) cada vez que se lee, de modo que una lectura normal nunca dispara una alerta.
+
+### Interlocks de seguridad
+
+Se evalúan en **cada ciclo y en cualquier modo**. Si algún sensor supera su límite de alerta (temperatura > 85 °C o presión > 12 Bar):
+
+- La bomba se fuerza al 100 % y la válvula se abre.
+- El panel muestra el aviso `INTERLOCK DE SEGURIDAD ACTIVO` y el evento queda en el registro.
+- Los comandos `encender`, `apagar` y `ajustar` quedan bloqueados. `leer` y `modo` siguen disponibles.
+
+El interlock se libera cuando las lecturas vuelven a estar dentro de los límites. Por ejemplo, el modo AUTO con la bomba forzada al 100 % enfría el reactor hasta bajar de 85 °C, y una nueva lectura de presión normal (`leer presion`) libera un interlock por presión.
 
 El panel también muestra un **registro de eventos** con las últimas 5 acciones del sistema.
 
@@ -107,12 +127,14 @@ El panel también muestra un **registro de eventos** con las últimas 5 acciones
 
 | Comando | Descripción | Ejemplo |
 | :--- | :--- | :--- |
-| `modo <manual/auto>` | Cambia el modo de operación | `modo auto` |
+| `modo <manual/auto/pruebas>` | Cambia el modo de operación | `modo auto` |
 | `encender <actuador>` | Enciende un actuador | `encender bomba` |
 | `apagar <actuador>` | Apaga un actuador | `apagar valvula` |
 | `ajustar <actuador> <valor>` | Ajusta la potencia (bomba: 0–100) o el estado (válvula: 0 o 1) | `ajustar bomba 75.5` |
 | `leer <sensor>` | Toma una lectura del sensor | `leer presion` |
 | `terminar` | Finaliza la simulación | `terminar` |
+
+`encender`, `apagar` y `ajustar` no están disponibles en modo AUTO ni mientras haya un interlock activo. En AUTO y PRUEBAS, presionar **Enter** sin escribir nada avanza un ciclo.
 
 ## Cómo ejecutarlo
 
@@ -129,6 +151,8 @@ Ingrese comando >> ajustar bomba 75.5
 Ingrese comando >> ajustar valvula 1
 Ingrese comando >> modo auto
 Ingrese comando >>                      (Enter avanza un ciclo)
+Ingrese comando >> modo pruebas
+Ingrese comando >>                      (Enter inyecta un fallo aleatorio)
 Ingrese comando >> terminar
 ```
 
