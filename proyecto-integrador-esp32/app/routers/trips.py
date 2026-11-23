@@ -1,0 +1,125 @@
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy.orm import Session
+
+from app import models, schemas
+from app.database import get_db
+from app.pdf_carta_porte import generate_carta_porte_pdf
+from app.security import require_employee_auth
+
+router = APIRouter(prefix="/trips", tags=["trips"])
+
+
+@router.post("", response_model=schemas.TripOut, status_code=201)
+def create_trip(payload: schemas.TripCreate, db: Session = Depends(get_db)) -> models.Trip:
+    truck = db.get(models.Truck, payload.truck_id)
+    if truck is None:
+        raise HTTPException(status_code=404, detail="Truck not found")
+
+    driver = db.get(models.Driver, payload.driver_id)
+    if driver is None:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    trip = models.Trip(
+        truck_id=payload.truck_id,
+        driver_id=payload.driver_id,
+        origin=payload.origin,
+        destination=payload.destination,
+        cargo_description=payload.cargo_description,
+    )
+    db.add(trip)
+    db.commit()
+    db.refresh(trip)
+    return trip
+
+
+@router.get("", response_model=list[schemas.TripOut])
+def list_trips(db: Session = Depends(get_db)) -> list[models.Trip]:
+    return db.query(models.Trip).order_by(models.Trip.started_at.desc()).all()
+
+
+@router.get("/{trip_id}", response_model=schemas.TripOut)
+def get_trip(trip_id: str, db: Session = Depends(get_db)) -> models.Trip:
+    trip = db.get(models.Trip, trip_id)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return trip
+
+
+@router.post("/{trip_id}/carta-porte", response_model=schemas.CartaPorteOut)
+def upsert_carta_porte(
+    trip_id: str,
+    payload: schemas.CartaPorteCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    _employee: str = Depends(require_employee_auth),
+) -> models.CartaPorteRecord:
+    """Crea o actualiza el registro de carta porte de un viaje.
+
+    Es un registro interno del sistema (datos fiscales, ubicaciones,
+    mercancía, medio de transporte y figura de transporte) — NO es el CFDI de
+    Carta Porte timbrado ante el SAT, eso queda fuera de alcance del reto. Un
+    viaje solo tiene un registro de carta porte, así que si ya existía se
+    actualiza (200) en vez de duplicarse (201).
+    """
+    trip = db.get(models.Trip, trip_id)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    record = (
+        db.query(models.CartaPorteRecord)
+        .filter(models.CartaPorteRecord.trip_id == trip_id)
+        .first()
+    )
+
+    if record is None:
+        record = models.CartaPorteRecord(trip_id=trip_id)
+        db.add(record)
+        response.status_code = 201
+    else:
+        response.status_code = 200
+
+    for field, value in payload.model_dump().items():
+        setattr(record, field, value)
+
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+@router.get("/{trip_id}/carta-porte", response_model=schemas.CartaPorteOut)
+def get_carta_porte(trip_id: str, db: Session = Depends(get_db)) -> models.CartaPorteRecord:
+    trip = db.get(models.Trip, trip_id)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    record = (
+        db.query(models.CartaPorteRecord)
+        .filter(models.CartaPorteRecord.trip_id == trip_id)
+        .first()
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Carta porte not registered for this trip")
+    return record
+
+
+@router.get("/{trip_id}/carta-porte/pdf")
+def download_carta_porte_pdf(trip_id: str, db: Session = Depends(get_db)) -> Response:
+    """Genera y descarga el PDF de la carta porte en el formato tradicional impreso."""
+    trip = db.get(models.Trip, trip_id)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    record = (
+        db.query(models.CartaPorteRecord)
+        .filter(models.CartaPorteRecord.trip_id == trip_id)
+        .first()
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Carta porte not registered for this trip")
+
+    pdf_bytes = generate_carta_porte_pdf(record, trip)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="carta-porte-{record.folio}.pdf"'},
+    )
