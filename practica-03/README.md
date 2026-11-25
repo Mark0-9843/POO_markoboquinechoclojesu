@@ -132,7 +132,7 @@ El código es compatible con las versiones 2.x y 3.x del core de Arduino-ESP32 (
 ## Evidencias
 
 - **Reporte PDF:** [`docs/Reporte_Evidencias_P3.pdf`](docs/Reporte_Evidencias_P3.pdf)
-- **Video demostrativo (máx. 3 min):** (https://youtu.be/8ZlP-GZZWmY?is=7agD5jShdIdrndoA)
+- **Video demostrativo (máx. 3 min):** https://youtu.be/8ZlP-GZZWmY?is=7agD5jShdIdrndoA
 
 ## Autores
 
